@@ -666,20 +666,49 @@ class DatabaseManager:
         return d
 
     def add_audit_event(self, event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Append to the global chain atomically, ordered by SQLite insertion rowid."""
+        import hashlib
+
         mid = str(uuid.uuid4())
         ts = datetime.datetime.now().isoformat()
         payload_json = json.dumps(payload, sort_keys=True)
+        # Reserve the write lock before reading the previous hash. Without this,
+        # simultaneous writers can both chain to the same predecessor.
         with self.get_cursor() as conn:
-            conn.execute("SELECT hash FROM logs_audit ORDER BY ts DESC LIMIT 1")
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("SELECT hash FROM logs_audit ORDER BY rowid DESC LIMIT 1")
             prev = conn.fetchone()
             prev_hash = prev[0] if prev else ""
-            import hashlib
-            h = hashlib.sha256(f"{prev_hash}|{event_type}|{payload_json}|{ts}".encode("utf-8")).hexdigest()
+            digest = hashlib.sha256(f"{prev_hash}|{event_type}|{payload_json}|{ts}".encode("utf-8")).hexdigest()
             conn.execute("""
                 INSERT INTO logs_audit (id, event_type, payload, prev_hash, hash, ts)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (mid, event_type, payload_json, prev_hash, h, ts))
-        return {"id": mid, "hash": h, "ts": ts}
+            """, (mid, event_type, payload_json, prev_hash, digest, ts))
+        return {"id": mid, "hash": digest, "ts": ts}
+
+    def verify_audit_chain(self) -> Dict[str, Any]:
+        """Verify the complete global chain; return the first broken row without its payload.
+
+        This catches alterations to retained rows, not removal of a tail from a
+        mutable SQLite database. Anchor the final digest externally for stronger
+        tamper evidence. This method does not expose entries across tenants.
+        """
+        import hashlib
+
+        previous = ""
+        count = 0
+        with self.get_cursor() as conn:
+            conn.execute("BEGIN")  # one consistent read snapshot
+            conn.execute("SELECT id, event_type, payload, prev_hash, hash, ts FROM logs_audit ORDER BY rowid")
+            for row in conn.fetchall():
+                count += 1
+                expected = hashlib.sha256(
+                    f"{previous}|{row['event_type']}|{row['payload']}|{row['ts']}".encode("utf-8")
+                ).hexdigest()
+                if row["prev_hash"] != previous or row["hash"] != expected:
+                    return {"valid": False, "checked": count, "first_bad_id": row["id"]}
+                previous = row["hash"]
+        return {"valid": True, "checked": count, "head_hash": previous}
 
     def add_procedural(self, skill_name: str, steps: list, tenant: str, project_id: str,
                        description: Optional[str] = None, trigger: Optional[str] = None,
