@@ -101,7 +101,7 @@ class VectorStore:
 
         self._schedule_save()
 
-    def search(self, query_vector: np.ndarray, k: int = 10) -> Tuple[List[float], List[int]]:
+    def search(self, query_vector: np.ndarray, k: int = 10, allowed_ids: Optional[set[int]] = None) -> Tuple[List[float], List[int]]:
         """Find top K nearest neighbors using L2 distance."""
         with self.lock:
             if len(self.ids) == 0:
@@ -120,14 +120,19 @@ class VectorStore:
             sq_dists = self.norms + query_norm_sq - (2.0 * dot_product)
             sq_dists = np.maximum(sq_dists, 0.0)
 
-            # Get top K indices
-            actual_k = min(k, len(self.ids))
-            if actual_k < len(self.ids):
-                top_k_partition = np.argpartition(sq_dists, actual_k - 1)[:actual_k]
-                sorted_idx_in_top_k = np.argsort(sq_dists[top_k_partition])
-                top_k_idx = top_k_partition[sorted_idx_in_top_k]
+            # Restrict the candidate set before top-k. Filtering after top-k
+            # silently loses a tenant's hits when another tenant dominates it.
+            candidates = np.arange(len(self.ids))
+            if allowed_ids is not None:
+                candidates = candidates[np.isin(self.ids, list(allowed_ids))]
+            actual_k = min(k, len(candidates))
+            if not actual_k:
+                return [], []
+            if actual_k < len(candidates):
+                partition = np.argpartition(sq_dists[candidates], actual_k - 1)[:actual_k]
+                top_k_idx = candidates[partition[np.argsort(sq_dists[candidates[partition]])]]
             else:
-                top_k_idx = np.argsort(sq_dists)
+                top_k_idx = candidates[np.argsort(sq_dists[candidates])]
 
             # Return in FAISS compatibility format (2D arrays)
             return (
