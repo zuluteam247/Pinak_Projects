@@ -1,7 +1,6 @@
 import os
 import pytest
 import numpy as np
-import faiss
 from unittest.mock import patch, MagicMock
 from app.services.vector_store import VectorStore
 
