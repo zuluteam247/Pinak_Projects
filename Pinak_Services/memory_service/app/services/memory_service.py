@@ -9,7 +9,6 @@ import concurrent.futures
 from typing import Dict, List, Optional, Any, Union
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 from app.core.schemas import MemoryCreate, MemoryRead, MemorySearchResult, ClientIssueCreate
 from app.core.database import DatabaseManager
@@ -296,10 +295,15 @@ class MemoryService:
         if backend == "dummy" or not name or name.lower() == "dummy":
             return _DeterministicEncoder()
         try:
-            return SentenceTransformer(name)
-        except Exception as e:
-            logger.warning(f"Failed to load model {name}: {e}. Falling back to Dummy.")
-            return _DeterministicEncoder()
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise RuntimeError(
+                "Real embeddings require the optional embeddings extra: "
+                "uv sync --extra embeddings, or set PINAK_EMBEDDING_BACKEND=none for keyword-only search."
+            ) from exc
+        # Do not silently substitute fake vectors for a configured real model.
+        # A missing model or failed download must stop startup rather than corrupt retrieval.
+        return SentenceTransformer(name)
 
     # --- Core Memory Operations ---
 
