@@ -5,7 +5,10 @@ set -euo pipefail
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$BASE_DIR"
 
-export PINAK_JWT_SECRET="${PINAK_JWT_SECRET:-secret}"
+if [ -z "${PINAK_JWT_SECRET:-}" ] || [ "$PINAK_JWT_SECRET" = "secret" ] || [ "$PINAK_JWT_SECRET" = "dev-secret-change-me" ]; then
+  echo "PINAK_JWT_SECRET must be set to a non-default signing secret" >&2
+  exit 1
+fi
 export PINAK_EMBEDDING_BACKEND="${PINAK_EMBEDDING_BACKEND:-dummy}"
 export PINAK_EMBEDDING_TIMEOUT_MS="${PINAK_EMBEDDING_TIMEOUT_MS:-50}"
 export PINAK_VERIFY_IN_BACKGROUND="${PINAK_VERIFY_IN_BACKGROUND:-1}"
