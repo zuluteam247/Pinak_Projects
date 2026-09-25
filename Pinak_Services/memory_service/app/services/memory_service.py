@@ -795,7 +795,7 @@ class MemoryService:
         keyword_results = self.db.search_keyword(query, tenant, project_id, limit=limit * 2)
 
         # 2. Vector Search (Semantic)
-        distances, ids = self._safe_vector_search(query, limit)
+        distances, ids = self._safe_vector_search(query, limit, tenant, project_id)
         
         
         # Note: VectorStore search now returns flat lists (unlike nested FAISS)
@@ -873,7 +873,7 @@ class MemoryService:
 
         return final_results
 
-    def _safe_vector_search(self, query: str, limit: int) -> tuple:
+    def _safe_vector_search(self, query: str, limit: int, tenant: str, project_id: str) -> tuple:
         if not self.vector_enabled or not self.vector_store:
             return [], []
         if os.getenv("PINAK_VECTOR_SEARCH_DISABLED", "false").lower() in ("1", "true", "yes"):
@@ -881,8 +881,11 @@ class MemoryService:
         timeout_ms = int(os.getenv("PINAK_EMBEDDING_TIMEOUT_MS", "0") or "0")
 
         def _compute():
+            allowed_ids = self.db.list_embedding_ids(tenant, project_id)
+            if not allowed_ids:
+                return [], []
             embedding = self.model.encode([query])[0].astype("float32")
-            return self.vector_store.search(np.array([embedding]), k=limit * 2)
+            return self.vector_store.search(np.array([embedding]), k=limit * 2, allowed_ids=allowed_ids)
 
         if timeout_ms <= 0:
             try:
