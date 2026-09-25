@@ -1,0 +1,64 @@
+[
+  {
+    "step": "write",
+    "layer": "semantic",
+    "status": 201,
+    "id": "a5d8717f-4054-42af-af95-df02f30ae995"
+  },
+  {
+    "step": "write",
+    "layer": "episodic",
+    "status": 201,
+    "id": "b4ac39f9-76d6-491d-acde-21272b7c59cb"
+  },
+  {
+    "step": "write",
+    "layer": "procedural",
+    "status": 201,
+    "id": "5bac6446-0fa7-4375-a5ed-6ee8fb036a7e"
+  },
+  {
+    "step": "write",
+    "layer": "rag",
+    "status": 201,
+    "id": "8ea88e96-a106-4a26-a381-297b127982d6"
+  },
+  {
+    "step": "write",
+    "layer": "working",
+    "status": 201,
+    "id": "fa2f2145-7a64-4d1a-b5e7-fda5474992ff"
+  },
+  {
+    "step": "write",
+    "layer": "session",
+    "status": 201,
+    "id": "466889a6-83ce-4d1f-a942-64358896baec"
+  },
+  {
+    "step": "write",
+    "layer": "event",
+    "status": 201,
+    "id": "b7c4863a-6b34-45b1-b81c-f50a2dc40a19"
+  },
+  {
+    "step": "quarantine",
+    "status": 202,
+    "id": "93aa4069-ea01-4ccc-a45f-a1513cc0c5c0"
+  },
+  {
+    "step": "MCP recall",
+    "marker_retained": true,
+    "boundary_label_present": true,
+    "source_visible": true,
+    "tool_calls_made_by_harness": [
+      "recall"
+    ],
+    "tool_count": 27
+  },
+  {
+    "step": "cross-tenant retrieve",
+    "status": 200,
+    "returned_records": 0
+  }
+]

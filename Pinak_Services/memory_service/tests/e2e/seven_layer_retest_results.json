@@ -1,0 +1,428 @@
+[
+  {
+    "layer": "semantic",
+    "method": "POST",
+    "path": "/memory/add",
+    "input": {
+      "content": "fixture semantic moonlamp",
+      "tags": [
+        "fixture"
+      ]
+    },
+    "status": 201,
+    "output": {
+      "id": "8cae600d-ae4b-40f7-b0ad-841fc05f7579",
+      "content": "fixture semantic moonlamp",
+      "tags": [
+        "fixture"
+      ],
+      "tenant": "sandbox-tenant",
+      "project_id": "sandbox-project",
+      "created_at": "2026-09-25T23:39:40.506218",
+      "client_id": "sandbox-agent",
+      "client_name": null,
+      "agent_id": "sandbox-agent"
+    }
+  },
+  {
+    "layer": "semantic",
+    "method": "GET",
+    "path": "/memory/retrieve_context",
+    "input": {
+      "query": "moonlamp"
+    },
+    "status": 200,
+    "output": {
+      "rag": [],
+      "semantic": [
+        {
+          "id": "1ee7c779-2059-4800-8442-bff2cdf889c7",
+          "content": "fixture semantic moonlamp",
+          "tags": [
+            "fixture"
+          ],
+          "type": "semantic",
+          "score": 0.5
+        },
+        {
+          "id": "8cae600d-ae4b-40f7-b0ad-841fc05f7579",
+          "content": "fixture semantic moonlamp",
+          "tags": [
+            "fixture"
+          ],
+          "type": "semantic",
+          "score": 0.25
+        }
+      ],
+      "episodic": [],
+      "procedural": [],
+      "working": []
+    }
+  },
+  {
+    "layer": "episodic",
+    "method": "POST",
+    "path": "/memory/episodic/add",
+    "input": {
+      "content": "fixture episodic moonlamp",
+      "goal": "test",
+      "outcome": "done"
+    },
+    "status": 201,
+    "output": {
+      "id": "b3722239-3321-4945-a22f-857411a05dae",
+      "goal": "test",
+      "agent_id": "sandbox-agent",
+      "client_id": "sandbox-agent",
+      "client_name": null
+    }
+  },
+  {
+    "layer": "episodic",
+    "method": "GET",
+    "path": "/memory/retrieve_context",
+    "input": {
+      "query": "moonlamp"
+    },
+    "status": 200,
+    "output": {
+      "rag": [],
+      "semantic": [
+        {
+          "id": "1ee7c779-2059-4800-8442-bff2cdf889c7",
+          "content": "fixture semantic moonlamp",
+          "tags": [
+            "fixture"
+          ],
+          "type": "semantic",
+          "score": 0.5
+        },
+        {
+          "id": "8cae600d-ae4b-40f7-b0ad-841fc05f7579",
+          "content": "fixture semantic moonlamp",
+          "tags": [
+            "fixture"
+          ],
+          "type": "semantic",
+          "score": 0.33333333333333337
+        }
+      ],
+      "episodic": [
+        {
+          "id": "b3722239-3321-4945-a22f-857411a05dae",
+          "content": "fixture episodic moonlamp",
+          "goal": "test",
+          "outcome": "done",
+          "plan": null,
+          "steps": [],
+          "type": "episodic",
+          "tool_logs": [],
+          "score": 0.16666666666666669
+        }
+      ],
+      "procedural": [],
+      "working": []
+    }
+  },
+  {
+    "layer": "procedural",
+    "method": "POST",
+    "path": "/memory/procedural/add",
+    "input": {
+      "skill_name": "fixture procedural moonlamp",
+      "steps": [
+        "one"
+      ],
+      "trigger": "fixture"
+    },
+    "status": 201,
+    "output": {
+      "id": "25f9fa1b-c4a0-4539-9bf0-73efe8ea2ecd",
+      "skill_name": "fixture procedural moonlamp"
+    }
+  },
+  {
+    "layer": "procedural",
+    "method": "GET",
+    "path": "/memory/retrieve_context",
+    "input": {
+      "query": "moonlamp"
+    },
+    "status": 200,
+    "output": {
+      "rag": [],
+      "semantic": [
+        {
+          "id": "1ee7c779-2059-4800-8442-bff2cdf889c7",
+          "content": "fixture semantic moonlamp",
+          "tags": [
+            "fixture"
+          ],
+          "type": "semantic",
+          "score": 0.5
+        },
+        {
+          "id": "8cae600d-ae4b-40f7-b0ad-841fc05f7579",
+          "content": "fixture semantic moonlamp",
+          "tags": [
+            "fixture"
+          ],
+          "type": "semantic",
+          "score": 0.375
+        }
+      ],
+      "episodic": [
+        {
+          "id": "b3722239-3321-4945-a22f-857411a05dae",
+          "content": "fixture episodic moonlamp",
+          "goal": "test",
+          "outcome": "done",
+          "plan": null,
+          "steps": [],
+          "type": "episodic",
+          "tool_logs": [],
+          "score": 0.25
+        }
+      ],
+      "procedural": [
+        {
+          "id": "25f9fa1b-c4a0-4539-9bf0-73efe8ea2ecd",
+          "content": "fixture procedural moonlamp",
+          "description": null,
+          "steps": [
+            "one"
+          ],
+          "type": "procedural",
+          "score": 0.125
+        }
+      ],
+      "working": []
+    }
+  },
+  {
+    "layer": "rag",
+    "method": "POST",
+    "path": "/memory/rag/add",
+    "input": {
+      "query": "fixture rag moonlamp",
+      "external_source": "fixture:document",
+      "content": "fixture rag content moonlamp"
+    },
+    "status": 201,
+    "output": {
+      "id": "9366716c-0137-4093-a968-e2a9d24d7adf",
+      "query": "fixture rag moonlamp"
+    }
+  },
+  {
+    "layer": "rag",
+    "method": "GET",
+    "path": "/memory/rag/search",
+    "input": {
+      "query": "moonlamp"
+    },
+    "status": 200,
+    "output": [
+      {
+        "id": "9366716c-0137-4093-a968-e2a9d24d7adf",
+        "query": "fixture rag moonlamp",
+        "external_source": "fixture:document",
+        "content": "fixture rag content moonlamp",
+        "agent_id": "sandbox-agent",
+        "client_id": "sandbox-agent",
+        "client_name": null,
+        "tenant": "sandbox-tenant",
+        "project_id": "sandbox-project",
+        "created_at": "2026-09-25T23:39:40.609916",
+        "type": "rag"
+      }
+    ]
+  },
+  {
+    "layer": "working",
+    "method": "POST",
+    "path": "/memory/working/add",
+    "input": {
+      "content": "fixture working moonlamp"
+    },
+    "status": 201,
+    "output": {
+      "id": "9e6caadc-36e0-4ff1-bdf4-bde7ef614454",
+      "content": "fixture working moonlamp",
+      "tenant": "sandbox-tenant",
+      "project_id": "sandbox-project",
+      "created_at": "2026-09-25T23:39:40.636825",
+      "nudges": []
+    }
+  },
+  {
+    "layer": "working",
+    "method": "GET",
+    "path": "/memory/working/list",
+    "input": {},
+    "status": 200,
+    "output": [
+      {
+        "id": "9e6caadc-36e0-4ff1-bdf4-bde7ef614454",
+        "session_id": "global",
+        "key": "current_context",
+        "value": "fixture working moonlamp",
+        "agent_id": "sandbox-agent",
+        "client_id": "sandbox-agent",
+        "client_name": null,
+        "tenant": "sandbox-tenant",
+        "project_id": "sandbox-project",
+        "updated_at": "2026-09-25T23:39:40.636825",
+        "expires_at": null
+      }
+    ]
+  },
+  {
+    "layer": "sessions",
+    "method": "POST",
+    "path": "/memory/session/add",
+    "input": {
+      "session_id": "fixture-moonlamp-session",
+      "content": "fixture sessions moonlamp",
+      "role": "user"
+    },
+    "status": 201,
+    "output": {
+      "id": "643b7474-85e5-44f5-915a-f7647101b550",
+      "ts": "2026-09-25T18:09:40.655820+00:00"
+    }
+  },
+  {
+    "layer": "sessions",
+    "method": "GET",
+    "path": "/memory/session/list",
+    "input": {
+      "session_id": "fixture-moonlamp-session"
+    },
+    "status": 200,
+    "output": [
+      {
+        "id": "643b7474-85e5-44f5-915a-f7647101b550",
+        "session_id": "fixture-moonlamp-session",
+        "content": "fixture sessions moonlamp",
+        "role": "user",
+        "tool_calls": null,
+        "agent_id": "sandbox-agent",
+        "client_id": "sandbox-agent",
+        "client_name": null,
+        "parent_client_id": null,
+        "child_client_id": null,
+        "tenant": "sandbox-tenant",
+        "project_id": "sandbox-project",
+        "ts": "2026-09-25T18:09:40.655820+00:00",
+        "expires_at": null
+      }
+    ]
+  },
+  {
+    "layer": "events",
+    "method": "POST",
+    "path": "/memory/event",
+    "input": {
+      "event_type": "fixture",
+      "payload": {
+        "marker": "fixture events moonlamp"
+      }
+    },
+    "status": 201,
+    "output": {
+      "id": "bfea1071-02e8-46d8-8918-debc7ccbbed0",
+      "ts": "2026-09-25T18:09:40.673225+00:00"
+    }
+  },
+  {
+    "layer": "events",
+    "method": "GET",
+    "path": "/memory/events",
+    "input": {},
+    "status": 200,
+    "output": [
+      {
+        "id": "bfea1071-02e8-46d8-8918-debc7ccbbed0",
+        "event_type": "fixture",
+        "payload": "{\"event_type\": \"fixture\", \"marker\": \"fixture events moonlamp\"}",
+        "tenant": "sandbox-tenant",
+        "project_id": "sandbox-project",
+        "ts": "2026-09-25T18:09:40.673225+00:00"
+      }
+    ]
+  },
+  {
+    "layer": "rag-hybrid",
+    "method": "GET",
+    "path": "/memory/retrieve_context",
+    "input": {
+      "query": "moonlamp"
+    },
+    "status": 200,
+    "output": {
+      "rag": [
+        {
+          "id": "9366716c-0137-4093-a968-e2a9d24d7adf",
+          "query": "fixture rag moonlamp",
+          "external_source": "fixture:document",
+          "content": "fixture rag content moonlamp",
+          "agent_id": "sandbox-agent",
+          "client_id": "sandbox-agent",
+          "client_name": null,
+          "tenant": "sandbox-tenant",
+          "project_id": "sandbox-project",
+          "created_at": "2026-09-25T23:39:40.609916",
+          "type": "rag",
+          "score": 0.09999999999999998
+        }
+      ],
+      "semantic": [
+        {
+          "id": "1ee7c779-2059-4800-8442-bff2cdf889c7",
+          "content": "fixture semantic moonlamp",
+          "tags": [
+            "fixture"
+          ],
+          "type": "semantic",
+          "score": 0.5
+        },
+        {
+          "id": "8cae600d-ae4b-40f7-b0ad-841fc05f7579",
+          "content": "fixture semantic moonlamp",
+          "tags": [
+            "fixture"
+          ],
+          "type": "semantic",
+          "score": 0.4
+        }
+      ],
+      "episodic": [
+        {
+          "id": "b3722239-3321-4945-a22f-857411a05dae",
+          "content": "fixture episodic moonlamp",
+          "goal": "test",
+          "outcome": "done",
+          "plan": null,
+          "steps": [],
+          "type": "episodic",
+          "tool_logs": [],
+          "score": 0.3
+        }
+      ],
+      "procedural": [
+        {
+          "id": "25f9fa1b-c4a0-4539-9bf0-73efe8ea2ecd",
+          "content": "fixture procedural moonlamp",
+          "description": null,
+          "steps": [
+            "one"
+          ],
+          "type": "procedural",
+          "score": 0.2
+        }
+      ],
+      "working": []
+    }
+  }
+]

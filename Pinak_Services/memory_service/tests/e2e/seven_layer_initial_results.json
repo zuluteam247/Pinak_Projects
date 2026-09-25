@@ -1,0 +1,441 @@
+[
+  {
+    "layer": "service",
+    "method": "GET",
+    "path": "/health",
+    "input": null,
+    "status": 200,
+    "output": {
+      "status": "ok"
+    }
+  },
+  {
+    "layer": "auth",
+    "method": "GET",
+    "path": "/memory/events",
+    "input": {},
+    "status": 200,
+    "output": []
+  },
+  {
+    "layer": "semantic",
+    "method": "POST",
+    "path": "/memory/add",
+    "input": {
+      "content": "sandbox seven-layer semantic lighthouse",
+      "tags": [
+        "sandbox",
+        "semantic"
+      ]
+    },
+    "status": 201,
+    "output": {
+      "id": "bf5f426d-e919-4df0-855c-189957b02138",
+      "content": "sandbox seven-layer semantic lighthouse",
+      "tags": [
+        "sandbox",
+        "semantic"
+      ],
+      "tenant": "sandbox-tenant",
+      "project_id": "sandbox-project",
+      "created_at": "2026-09-25T23:34:33.353838",
+      "client_id": "sandbox-connected-agent",
+      "client_name": "sandbox-connected-agent",
+      "agent_id": "sandbox-connected-agent"
+    }
+  },
+  {
+    "layer": "semantic",
+    "method": "GET",
+    "path": "/memory/search",
+    "input": {
+      "query": "lighthouse"
+    },
+    "status": 200,
+    "output": [
+      {
+        "id": "bf5f426d-e919-4df0-855c-189957b02138",
+        "content": "sandbox seven-layer semantic lighthouse",
+        "tags": [
+          "semantic"
+        ],
+        "tenant": "sandbox-tenant",
+        "project_id": "sandbox-project",
+        "created_at": "",
+        "client_id": null,
+        "client_name": null,
+        "agent_id": null,
+        "distance": 0.4918075289329137,
+        "metadata": {
+          "id": "bf5f426d-e919-4df0-855c-189957b02138",
+          "content": "sandbox seven-layer semantic lighthouse",
+          "tags": [
+            "sandbox",
+            "semantic"
+          ],
+          "type": "semantic",
+          "score": 0.5081924710670863
+        }
+      }
+    ]
+  },
+  {
+    "layer": "episodic",
+    "method": "POST",
+    "path": "/memory/episodic/add",
+    "input": {
+      "content": "sandbox episode lighthouse",
+      "salience": 5,
+      "goal": "check",
+      "plan": [
+        "connect"
+      ],
+      "outcome": "pass",
+      "tool_logs": []
+    },
+    "status": 201,
+    "output": {
+      "id": "f8290d84-9aa7-4021-b061-0b39b78b872a",
+      "goal": "check",
+      "agent_id": "sandbox-connected-agent",
+      "client_id": "sandbox-connected-agent",
+      "client_name": "sandbox-connected-agent"
+    }
+  },
+  {
+    "layer": "episodic",
+    "method": "GET",
+    "path": "/memory/retrieve_context",
+    "input": {
+      "query": "sandbox episode lighthouse"
+    },
+    "status": 200,
+    "output": {
+      "semantic": [
+        {
+          "id": "bf5f426d-e919-4df0-855c-189957b02138",
+          "content": "sandbox seven-layer semantic lighthouse",
+          "tags": [
+            "sandbox",
+            "semantic"
+          ],
+          "embedding_id": 2015035163,
+          "agent_id": "sandbox-connected-agent",
+          "client_id": "sandbox-connected-agent",
+          "client_name": "sandbox-connected-agent",
+          "tenant": "sandbox-tenant",
+          "project_id": "sandbox-project",
+          "created_at": "2026-09-25T23:34:33.353838",
+          "type": "semantic",
+          "score": 0.007850743865648012
+        }
+      ],
+      "episodic": [
+        {
+          "id": "f8290d84-9aa7-4021-b061-0b39b78b872a",
+          "content": "sandbox episode lighthouse",
+          "goal": "check",
+          "outcome": "pass",
+          "plan": [
+            "connect"
+          ],
+          "steps": [],
+          "type": "episodic",
+          "tool_logs": [],
+          "score": 0.5074305826254347
+        }
+      ],
+      "procedural": [],
+      "working": []
+    }
+  },
+  {
+    "layer": "procedural",
+    "method": "POST",
+    "path": "/memory/procedural/add",
+    "input": {
+      "skill_name": "sandbox procedure lighthouse",
+      "steps": [
+        "check",
+        "record"
+      ],
+      "trigger": "sandbox"
+    },
+    "status": 201,
+    "output": {
+      "id": "b79b7692-d007-4d4b-b4eb-7771009bb7e1",
+      "skill_name": "sandbox procedure lighthouse"
+    }
+  },
+  {
+    "layer": "procedural",
+    "method": "GET",
+    "path": "/memory/retrieve_context",
+    "input": {
+      "query": "sandbox procedure lighthouse"
+    },
+    "status": 200,
+    "output": {
+      "semantic": [
+        {
+          "id": "bf5f426d-e919-4df0-855c-189957b02138",
+          "content": "sandbox seven-layer semantic lighthouse",
+          "tags": [
+            "sandbox",
+            "semantic"
+          ],
+          "embedding_id": 2015035163,
+          "agent_id": "sandbox-connected-agent",
+          "client_id": "sandbox-connected-agent",
+          "client_name": "sandbox-connected-agent",
+          "tenant": "sandbox-tenant",
+          "project_id": "sandbox-project",
+          "created_at": "2026-09-25T23:34:33.353838",
+          "type": "semantic",
+          "score": 0.007707299495666761
+        }
+      ],
+      "episodic": [
+        {
+          "id": "f8290d84-9aa7-4021-b061-0b39b78b872a",
+          "content": "sandbox episode lighthouse",
+          "goal": "check",
+          "outcome": "pass",
+          "plan": [
+            "connect"
+          ],
+          "steps": [],
+          "salience": 5,
+          "embedding_id": 551373267,
+          "agent_id": "sandbox-connected-agent",
+          "client_id": "sandbox-connected-agent",
+          "client_name": "sandbox-connected-agent",
+          "tenant": "sandbox-tenant",
+          "project_id": "sandbox-project",
+          "created_at": "2026-09-25T23:34:33.390525",
+          "type": "episodic",
+          "score": 0.007778349327358412
+        }
+      ],
+      "procedural": [
+        {
+          "id": "b79b7692-d007-4d4b-b4eb-7771009bb7e1",
+          "content": "sandbox procedure lighthouse",
+          "description": null,
+          "steps": [
+            "check",
+            "record"
+          ],
+          "type": "procedural",
+          "score": 0.5081992748065721
+        }
+      ],
+      "working": []
+    }
+  },
+  {
+    "layer": "rag",
+    "method": "POST",
+    "path": "/memory/rag/add",
+    "input": {
+      "query": "sandbox rag lighthouse",
+      "external_source": "sandbox-only:fixture",
+      "content": "sandbox rag document lighthouse"
+    },
+    "status": 201,
+    "output": {
+      "id": "5ac25de5-d203-46ce-8443-5c6487fb9fa3",
+      "query": "sandbox rag lighthouse"
+    }
+  },
+  {
+    "layer": "rag",
+    "method": "GET",
+    "path": "/memory/retrieve_context",
+    "input": {
+      "query": "sandbox rag lighthouse"
+    },
+    "status": 200,
+    "output": {
+      "semantic": [
+        {
+          "id": "bf5f426d-e919-4df0-855c-189957b02138",
+          "content": "sandbox seven-layer semantic lighthouse",
+          "tags": [
+            "sandbox",
+            "semantic"
+          ],
+          "embedding_id": 2015035163,
+          "agent_id": "sandbox-connected-agent",
+          "client_id": "sandbox-connected-agent",
+          "client_name": "sandbox-connected-agent",
+          "tenant": "sandbox-tenant",
+          "project_id": "sandbox-project",
+          "created_at": "2026-09-25T23:34:33.353838",
+          "type": "semantic",
+          "score": 0.00779582401916981
+        }
+      ],
+      "episodic": [
+        {
+          "id": "f8290d84-9aa7-4021-b061-0b39b78b872a",
+          "content": "sandbox episode lighthouse",
+          "goal": "check",
+          "outcome": "pass",
+          "plan": [
+            "connect"
+          ],
+          "steps": [],
+          "salience": 5,
+          "embedding_id": 551373267,
+          "agent_id": "sandbox-connected-agent",
+          "client_id": "sandbox-connected-agent",
+          "client_name": "sandbox-connected-agent",
+          "tenant": "sandbox-tenant",
+          "project_id": "sandbox-project",
+          "created_at": "2026-09-25T23:34:33.390525",
+          "type": "episodic",
+          "score": 0.007399328442297748
+        }
+      ],
+      "procedural": [
+        {
+          "id": "b79b7692-d007-4d4b-b4eb-7771009bb7e1",
+          "skill_name": "sandbox procedure lighthouse",
+          "trigger": "sandbox",
+          "steps": [
+            "check",
+            "record"
+          ],
+          "description": null,
+          "code_snippet": null,
+          "embedding_id": 549271448,
+          "agent_id": "sandbox-connected-agent",
+          "client_id": "sandbox-connected-agent",
+          "client_name": "sandbox-connected-agent",
+          "tenant": "sandbox-tenant",
+          "project_id": "sandbox-project",
+          "created_at": "2026-09-25T23:34:33.440455",
+          "type": "procedural",
+          "content": "sandbox procedure lighthouse",
+          "score": 0.007686050362769943
+        }
+      ],
+      "working": []
+    }
+  },
+  {
+    "layer": "working",
+    "method": "POST",
+    "path": "/memory/working/add",
+    "input": {
+      "content": "sandbox working lighthouse"
+    },
+    "status": 201,
+    "output": {
+      "id": "56f1a587-ca0e-438d-b172-6ad5096fb455",
+      "content": "sandbox working lighthouse",
+      "tenant": "sandbox-tenant",
+      "project_id": "sandbox-project",
+      "created_at": "2026-09-25T23:34:33.511539",
+      "nudges": []
+    }
+  },
+  {
+    "layer": "working",
+    "method": "GET",
+    "path": "/memory/working/list",
+    "input": null,
+    "status": 200,
+    "output": [
+      {
+        "id": "56f1a587-ca0e-438d-b172-6ad5096fb455",
+        "session_id": "global",
+        "key": "current_context",
+        "value": "sandbox working lighthouse",
+        "agent_id": "sandbox-connected-agent",
+        "client_id": "sandbox-connected-agent",
+        "client_name": "sandbox-connected-agent",
+        "tenant": "sandbox-tenant",
+        "project_id": "sandbox-project",
+        "updated_at": "2026-09-25T23:34:33.511539",
+        "expires_at": null
+      }
+    ]
+  },
+  {
+    "layer": "sessions",
+    "method": "POST",
+    "path": "/memory/session/add",
+    "input": {
+      "session_id": "sandbox-session-seven",
+      "content": "sandbox session lighthouse",
+      "role": "assistant"
+    },
+    "status": 201,
+    "output": {
+      "id": "07281baa-88a1-46ef-af0e-b1e1f6a24442",
+      "ts": "2026-09-25T18:04:33.535377+00:00"
+    }
+  },
+  {
+    "layer": "sessions",
+    "method": "GET",
+    "path": "/memory/session/list",
+    "input": {
+      "session_id": "sandbox-session-seven"
+    },
+    "status": 200,
+    "output": [
+      {
+        "id": "07281baa-88a1-46ef-af0e-b1e1f6a24442",
+        "session_id": "sandbox-session-seven",
+        "content": "sandbox session lighthouse",
+        "role": "assistant",
+        "tool_calls": null,
+        "agent_id": "sandbox-connected-agent",
+        "client_id": "sandbox-connected-agent",
+        "client_name": "sandbox-connected-agent",
+        "parent_client_id": null,
+        "child_client_id": null,
+        "tenant": "sandbox-tenant",
+        "project_id": "sandbox-project",
+        "ts": "2026-09-25T18:04:33.535377+00:00",
+        "expires_at": null
+      }
+    ]
+  },
+  {
+    "layer": "events",
+    "method": "POST",
+    "path": "/memory/event",
+    "input": {
+      "event_type": "sandbox_e2e",
+      "payload": {
+        "marker": "sandbox event lighthouse"
+      }
+    },
+    "status": 201,
+    "output": {
+      "id": "924031fb-dca9-44c7-a03f-3bb020727c2f",
+      "ts": "2026-09-25T18:04:33.554103+00:00"
+    }
+  },
+  {
+    "layer": "events",
+    "method": "GET",
+    "path": "/memory/events",
+    "input": null,
+    "status": 200,
+    "output": [
+      {
+        "id": "924031fb-dca9-44c7-a03f-3bb020727c2f",
+        "event_type": "sandbox_e2e",
+        "payload": "{\"event_type\": \"sandbox_e2e\", \"marker\": \"sandbox event lighthouse\"}",
+        "tenant": "sandbox-tenant",
+        "project_id": "sandbox-project",
+        "ts": "2026-09-25T18:04:33.554103+00:00"
+      }
+    ]
+  }
+]

@@ -795,6 +795,10 @@ class MemoryService:
         # 1. Keyword Search (SQLite FTS)
         keyword_results = self.db.search_keyword(query, tenant, project_id, limit=limit * 2)
 
+        # RAG is deliberately keyword-only until a separately indexed vector path exists.
+        rag_results = self.db.search_rag(query, tenant, project_id, limit=limit * 2)
+        keyword_results.extend(rag_results)
+
         # 2. Vector Search (Semantic)
         distances, ids = self._safe_vector_search(query, limit, tenant, project_id)
         
@@ -1029,6 +1033,7 @@ class MemoryService:
             "semantic": [],
             "episodic": [],
             "procedural": [],
+            "rag": [],
             "working": []
         }
 
@@ -1243,14 +1248,14 @@ class MemoryService:
         auto_resolve = os.getenv("PINAK_AUTO_RESOLVE_ISSUES", "")
         auto_codes = [c.strip() for c in auto_resolve.split(",") if c.strip()]
         if item.error_code in auto_codes and self._is_trusted_client(client_meta["client_id"], tenant, project_id):
-            return self.resolve_client_issue(issue.get("id"), "auto-resolved by policy", "auto-policy")
+            return self.resolve_client_issue(issue.get("id"), "auto-resolved by policy", "auto-policy", tenant, project_id)
         return issue
 
     def list_client_issues(self, tenant: str, project_id: str, status: str = "open", limit: int = 200) -> List[Dict[str, Any]]:
         return self.db.list_client_issues(tenant, project_id, status, limit)
 
-    def resolve_client_issue(self, issue_id: str, resolution: str, reviewer: str) -> Dict[str, Any]:
-        resolved = self.db.resolve_client_issue(issue_id, resolution, reviewer)
+    def resolve_client_issue(self, issue_id: str, resolution: str, reviewer: str, tenant: str, project_id: str) -> Dict[str, Any]:
+        resolved = self.db.resolve_client_issue(issue_id, resolution, reviewer, tenant, project_id)
         if not resolved:
             return {"id": issue_id, "status": "missing"}
         return resolved
@@ -1268,6 +1273,8 @@ class MemoryService:
             parent_client_id=parent_client_id,
             child_client_id=child_client_id,
         )
+        if layer not in {"semantic", "episodic", "procedural", "rag"}:
+            raise ValueError("Unsupported quarantine layer")
         validation_errors = self.schema_registry.validate_payload(layer, payload)
         if validation_errors:
             try:
@@ -1347,7 +1354,14 @@ class MemoryService:
                            agent_id: Optional[str] = None, client_name: Optional[str] = None,
                            client_id: Optional[str] = None, parent_client_id: Optional[str] = None,
                            child_client_id: Optional[str] = None) -> Dict[str, Any]:
-        item = self.db.resolve_quarantine(item_id, status, reviewer)
+        if status == "approved":
+            candidates = [row for row in self.db.list_quarantine(tenant, project_id) if row["id"] == item_id]
+            if candidates:
+                candidate = candidates[0]
+                errors = self.schema_registry.validate_payload(candidate["layer"], candidate["payload"])
+                if errors:
+                    raise ValueError("Invalid quarantined payload: " + "; ".join(errors))
+        item = self.db.resolve_quarantine(item_id, status, reviewer, tenant, project_id)
         if not item:
             return {"status": "missing", "id": item_id}
         layer = item.get("layer")
@@ -1446,6 +1460,18 @@ class MemoryService:
         if not safe_updates:
             return False
 
+        if layer not in {"semantic", "episodic", "procedural", "rag"}:
+            raise ValueError("Invalid layer")
+        allowed = {
+            "semantic": {"content", "tags"},
+            "episodic": {"content", "goal", "outcome", "plan", "salience"},
+            "procedural": {"skill_name", "trigger", "steps", "description", "code_snippet"},
+            "rag": {"query", "external_source", "content"},
+        }
+        if not set(safe_updates).issubset(allowed[layer]):
+            raise ValueError("Unsupported update field")
+        if "content" in safe_updates and not isinstance(safe_updates["content"], str):
+            raise ValueError("content must be a string")
         if layer == "semantic" and "content" in safe_updates and self.vector_enabled and self.vector_store:
             # 1. Fetch old record to get embedding_id
             old_item = self.db.get_memory(layer, memory_id, tenant, project_id)

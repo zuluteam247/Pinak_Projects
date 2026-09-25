@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 embeddings = ["sentence-transformers>=2.2"]
+mcp = ["fastmcp>=2.14,<3", "httpx>=0.28", "packaging>=24"]
 tests = [
     "asgi-lifespan>=2.1.0",
     "httpx>=0.26.0",

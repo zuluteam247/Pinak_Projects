@@ -34,7 +34,7 @@ class SchemaRegistry:
     def validate_payload(self, layer: str, payload: Dict[str, Any]) -> List[str]:
         schema = self.load_schema(layer)
         if not schema:
-            return []
+            return [f"Schema not found for {layer}"]
         validator = Draft7Validator(schema)
         errors = []
         for error in validator.iter_errors(payload):

@@ -99,6 +99,16 @@ def search_memory(
 
 # --- Unified Retrieval ---
 
+@router.get("/rag/search")
+def search_rag(
+    query: str,
+    limit: int = 10,
+    ctx: AuthContext = Depends(require_auth_context),
+    service: MemoryService = Depends(get_memory_service),
+):
+    require_scope(ctx, "memory.read")
+    return service.db.search_rag(query, ctx.tenant_id, ctx.project_id, limit)
+
 @router.get("/retrieve_context", response_model=ContextResponse)
 def retrieve_context(
     query: str,
@@ -363,7 +373,7 @@ def resolve_client_issue(
 ):
     require_scope(ctx, "memory.admin")
     require_role(ctx, "admin")
-    return service.resolve_client_issue(issue_id, resolution.get("resolution", "resolved"), ctx.subject or "admin")
+    return service.resolve_client_issue(issue_id, resolution.get("resolution", "resolved"), ctx.subject or "admin", ctx.tenant_id, ctx.project_id)
 
 # --- Quarantine ---
 
@@ -375,6 +385,8 @@ def propose_quarantine(
     service: MemoryService = Depends(get_memory_service),
 ):
     require_scope(ctx, "memory.write")
+    if layer not in {"semantic", "episodic", "procedural", "rag"}:
+        raise HTTPException(status_code=400, detail="Unsupported quarantine layer")
     return service.propose_memory(
         layer,
         payload,
@@ -407,7 +419,13 @@ def approve_quarantine(
     require_scope(ctx, "memory.admin")
     require_role(ctx, "admin")
     reviewer = ctx.subject or "admin"
-    return service.resolve_quarantine(item_id, "approved", reviewer, ctx.tenant_id, ctx.project_id, ctx.subject, ctx.client_name)
+    try:
+        result = service.resolve_quarantine(item_id, "approved", reviewer, ctx.tenant_id, ctx.project_id, ctx.subject, ctx.client_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result.get("status") == "missing":
+        raise HTTPException(status_code=404, detail="Quarantine item not found")
+    return result
 
 @router.post("/quarantine/reject/{item_id}")
 def reject_quarantine(
@@ -418,7 +436,10 @@ def reject_quarantine(
     require_scope(ctx, "memory.admin")
     require_role(ctx, "admin")
     reviewer = ctx.subject or "admin"
-    return service.resolve_quarantine(item_id, "rejected", reviewer, ctx.tenant_id, ctx.project_id, ctx.subject, ctx.client_name)
+    result = service.resolve_quarantine(item_id, "rejected", reviewer, ctx.tenant_id, ctx.project_id, ctx.subject, ctx.client_name)
+    if result.get("status") == "missing":
+        raise HTTPException(status_code=404, detail="Quarantine item not found")
+    return result
 
 @router.get("/working/list")
 def list_working(
@@ -428,6 +449,36 @@ def list_working(
 ):
     require_scope(ctx, "memory.read")
     return service.working_list(ctx.tenant_id, ctx.project_id, limit)
+
+@router.post("/maintenance/verify")
+def verify_maintenance(
+    ctx: AuthContext = Depends(require_auth_context),
+    service: MemoryService = Depends(get_memory_service),
+):
+    require_scope(ctx, "memory.admin")
+    require_role(ctx, "admin")
+    # This verifies the global audit chain and vector index. It does not
+    # condense memories; keep the distinction visible in the response.
+    audit = service.db.verify_audit_chain()
+    if not audit.get("valid"):
+        raise HTTPException(status_code=409, detail={"audit": audit})
+    service.verify_and_recover()
+    return {"audit": audit, "vectors_checked": service.vector_enabled, "condensed": False}
+
+@router.get("/{layer}/{memory_id}")
+def get_memory_by_id(
+    layer: str,
+    memory_id: str,
+    ctx: AuthContext = Depends(require_auth_context),
+    service: MemoryService = Depends(get_memory_service),
+):
+    require_scope(ctx, "memory.read")
+    if layer not in {"semantic", "episodic", "procedural", "rag", "working"}:
+        raise HTTPException(status_code=400, detail="Unsupported layer")
+    item = service.db.get_memory(layer, memory_id, ctx.tenant_id, ctx.project_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return item
 
 @router.put("/{layer}/{memory_id}", status_code=status.HTTP_200_OK)
 def update_memory(
@@ -439,7 +490,12 @@ def update_memory(
 ):
     require_scope(ctx, "memory.admin")
     require_role(ctx, "admin")
-    success = service.update_memory(layer, memory_id, updates, ctx.tenant_id, ctx.project_id)
+    if layer not in {"semantic", "episodic", "procedural", "rag"}:
+        raise HTTPException(status_code=400, detail="Unsupported layer")
+    try:
+        success = service.update_memory(layer, memory_id, updates, ctx.tenant_id, ctx.project_id)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not success:
         raise HTTPException(status_code=404, detail="Memory not found")
     return {"status": "updated", "id": memory_id}
@@ -453,6 +509,8 @@ def delete_memory(
 ):
     require_scope(ctx, "memory.admin")
     require_role(ctx, "admin")
+    if layer not in {"semantic", "episodic", "procedural", "rag"}:
+        raise HTTPException(status_code=400, detail="Unsupported layer")
     success = service.delete_memory(layer, memory_id, ctx.tenant_id, ctx.project_id)
     if not success:
         raise HTTPException(status_code=404, detail="Memory not found")

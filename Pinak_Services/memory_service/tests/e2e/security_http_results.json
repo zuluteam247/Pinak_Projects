@@ -1,0 +1,217 @@
+[
+  {
+    "test": "missing bearer",
+    "status": 401,
+    "expected": [
+      401
+    ],
+    "output": {
+      "detail": "Missing bearer token"
+    }
+  },
+  {
+    "test": "bad JWT",
+    "status": 401,
+    "expected": [
+      401
+    ],
+    "output": {
+      "detail": "Invalid token"
+    }
+  },
+  {
+    "test": "expired JWT",
+    "status": 401,
+    "expected": [
+      401
+    ],
+    "output": {
+      "detail": "Token expired"
+    }
+  },
+  {
+    "test": "missing tenant",
+    "status": 403,
+    "expected": [
+      403
+    ],
+    "output": {
+      "detail": "Tenant or project missing in token"
+    }
+  },
+  {
+    "test": "read scope required",
+    "status": 403,
+    "expected": [
+      403
+    ],
+    "output": {
+      "detail": "Missing scope: memory.read"
+    }
+  },
+  {
+    "test": "admin role required",
+    "status": 403,
+    "expected": [
+      403
+    ],
+    "output": {
+      "detail": "Missing role: admin"
+    }
+  },
+  {
+    "test": "unsigned client header",
+    "status": 403,
+    "expected": [
+      403
+    ],
+    "output": {
+      "detail": "Client identity header does not match token"
+    }
+  },
+  {
+    "test": "unicode write",
+    "status": 201,
+    "expected": [
+      201
+    ],
+    "output": "ok"
+  },
+  {
+    "test": "unicode read",
+    "status": 200,
+    "expected": [
+      200
+    ],
+    "output": "ok"
+  },
+  {
+    "test": "other tenant read",
+    "status": 404,
+    "expected": [
+      404
+    ],
+    "output": {
+      "detail": "Memory not found"
+    }
+  },
+  {
+    "test": "other project read",
+    "status": 404,
+    "expected": [
+      404
+    ],
+    "output": {
+      "detail": "Memory not found"
+    }
+  },
+  {
+    "test": "other tenant admin update",
+    "status": 404,
+    "expected": [
+      404
+    ],
+    "output": {
+      "detail": "Memory not found"
+    }
+  },
+  {
+    "test": "other tenant admin delete",
+    "status": 404,
+    "expected": [
+      404
+    ],
+    "output": {
+      "detail": "Memory not found"
+    }
+  },
+  {
+    "test": "SQL column injection",
+    "status": 400,
+    "expected": [
+      400
+    ],
+    "output": {
+      "detail": "Unsupported update field"
+    }
+  },
+  {
+    "test": "system field update refused",
+    "status": 404,
+    "expected": [
+      404
+    ],
+    "output": {
+      "detail": "Memory not found"
+    }
+  },
+  {
+    "test": "SQL-like RAG query literal",
+    "status": 200,
+    "expected": [
+      200
+    ],
+    "output": "ok"
+  },
+  {
+    "test": "oversize body rejected",
+    "status": 413,
+    "expected": [
+      413
+    ],
+    "output": {
+      "detail": "Request body too large"
+    }
+  },
+  {
+    "test": "proposal",
+    "status": 202,
+    "expected": [
+      202
+    ],
+    "output": "ok"
+  },
+  {
+    "test": "cross-tenant quarantine review",
+    "status": 404,
+    "expected": [
+      404
+    ],
+    "output": {
+      "detail": "Quarantine item not found"
+    }
+  },
+  {
+    "test": "reject pending fixture",
+    "status": 200,
+    "expected": [
+      200
+    ],
+    "output": "ok"
+  },
+  {
+    "test": "12 concurrent event writes",
+    "status": [
+      201,
+      201,
+      201,
+      201,
+      201,
+      201,
+      201,
+      201,
+      201,
+      201,
+      201,
+      201
+    ]
+  },
+  {
+    "test": "audit consistency",
+    "status": 200,
+    "expected": [
+      200
+    ],
+    "output": "ok"
+  }
+]

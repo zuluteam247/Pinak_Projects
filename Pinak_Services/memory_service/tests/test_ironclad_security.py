@@ -70,18 +70,20 @@ def test_require_auth_context_header_overrides(jwt_secret):
         "scopes": ["memory.read"],
         "client_name": "token-client",
         "client_id": "token-client-id",
+        "parent_client_id": "parent-client",
+        "child_client_id": "child-client",
     }
     token = jwt.encode(payload, jwt_secret, algorithm="HS256")
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
     context = require_auth_context(
         creds,
-        client_id_header="header-client-id",
+        client_id_header="token-client-id",
         client_name_header="header-client",
         parent_client_id_header="parent-client",
         child_client_id_alt="child-client",
     )
 
-    assert context.client_id == "header-client-id"
+    assert context.client_id == "token-client-id"
     assert context.client_name == "header-client"
     assert context.parent_client_id == "parent-client"
     assert context.child_client_id == "child-client"

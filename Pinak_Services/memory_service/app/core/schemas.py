@@ -166,6 +166,7 @@ class WorkingRead(BaseModel):
     nudges: List[Nudge] = []
 
 class ContextResponse(BaseModel):
+    rag: List[Dict[str, Any]] = []
     semantic: List[Dict[str, Any]]
     episodic: List[Dict[str, Any]]
     procedural: List[Dict[str, Any]]

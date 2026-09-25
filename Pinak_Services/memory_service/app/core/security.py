@@ -82,6 +82,18 @@ def require_auth_context(
     child_client_id = _normalize_header(child_client_id)
     child_client_id_alt = _normalize_header(child_client_id_alt)
 
+    # Headers are provenance hints, never authority to impersonate a trusted client.
+    # Each asserted ID must match the signed claim; a missing claim cannot be
+    # populated by an untrusted header. Admins can register a client separately.
+    for header_value, claim_value in (
+        (client_id_header, payload.get("client_id") or payload.get("cid")),
+        (parent_client_id_header, payload.get("parent_client_id") or payload.get("parent_client")),
+        (child_client_id or child_client_id_alt, payload.get("child_client_id")),
+    ):
+        if header_value and header_value != claim_value:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Client identity header does not match token")
+    if child_client_id and child_client_id_alt and child_client_id != child_client_id_alt:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Conflicting child identity headers")
     resolved_child_id = child_client_id or child_client_id_alt
     client_name = client_name_header or payload.get("client_name") or payload.get("client")
     client_id = client_id_header or payload.get("client_id") or payload.get("cid") or client_name
@@ -104,16 +116,10 @@ def require_auth_context(
 
 
 def require_scope(ctx: AuthContext, scope: str) -> None:
-    enforce = os.getenv("PINAK_ENFORCE_SCOPES", "true").lower() in ("1", "true", "yes")
-    if not enforce:
-        return
     if scope not in ctx.scopes:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Missing scope: {scope}")
 
 
 def require_role(ctx: AuthContext, role: str) -> None:
-    enforce = os.getenv("PINAK_ENFORCE_SCOPES", "true").lower() in ("1", "true", "yes")
-    if not enforce:
-        return
     if role not in ctx.roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Missing role: {role}")

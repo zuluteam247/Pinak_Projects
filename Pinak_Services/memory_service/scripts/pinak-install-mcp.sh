@@ -34,3 +34,4 @@ EOF
 /bin/echo "Installed MCP client to $TARGET_DIR"
 /bin/echo "Schemas synced to $SCHEMA_DIR"
 /bin/echo "Templates synced to $TEMPLATE_DIR"
+/bin/echo "Desktop client config was not changed. Use scripts/pinak_mcp_config.py install/verify with an explicit client; verify runtime and authentication separately."

@@ -47,6 +47,7 @@ class DatabaseManager:
                 END;
             """)
 
+
             # 2. Episodic Memory (Events/Logs)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memories_episodic (
@@ -76,6 +77,7 @@ class DatabaseManager:
                 END;
             """)
 
+
             # 3. Procedural Memory (Skills)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memories_procedural (
@@ -104,6 +106,7 @@ class DatabaseManager:
                   INSERT INTO memories_procedural_fts(rowid, skill_name, trigger, steps, description) VALUES (new.rowid, new.skill_name, new.trigger, new.steps, new.description);
                 END;
             """)
+
 
             # 4. RAG Memory (External Source)
             conn.execute("""
@@ -347,6 +350,29 @@ class DatabaseManager:
             self._ensure_column(conn, "working_memory", "agent_id", "TEXT")
             self._ensure_column(conn, "working_memory", "client_id", "TEXT")
             self._ensure_column(conn, "working_memory", "client_name", "TEXT")
+            # Add FTS update/delete triggers only for complete schemas. Doctor can
+            # open sparse legacy DBs and backfill IDs before their FTS migration.
+            fts_tables = {
+                "semantic": ("content", "tags"),
+                "episodic": ("content", "goal", "outcome"),
+                "procedural": ("skill_name", "trigger", "steps", "description"),
+            }
+            for layer, cols in fts_tables.items():
+                table = f"memories_{layer}"
+                if not all(self._column_exists(conn, table, col) for col in cols):
+                    continue
+                fts = f"{table}_fts"
+                old_cols = ", ".join(f"old.{col}" for col in cols)
+                new_cols = ", ".join(f"new.{col}" for col in cols)
+                names = ", ".join(cols)
+                conn.execute(f"""CREATE TRIGGER IF NOT EXISTS {table}_au AFTER UPDATE ON {table} BEGIN
+                    INSERT INTO {fts}({fts}, rowid, {names}) VALUES ('delete', old.rowid, {old_cols});
+                    INSERT INTO {fts}(rowid, {names}) VALUES (new.rowid, {new_cols});
+                END""")
+                conn.execute(f"""CREATE TRIGGER IF NOT EXISTS {table}_ad AFTER DELETE ON {table} BEGIN
+                    INSERT INTO {fts}({fts}, rowid, {names}) VALUES ('delete', old.rowid, {old_cols});
+                END""")
+
 
     def _column_exists(self, conn: sqlite3.Connection, table: str, column: str) -> bool:
         try:
@@ -484,6 +510,22 @@ class DatabaseManager:
             
         return results
 
+    def search_rag(self, query: str, tenant: str, project_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Tenant-scoped RAG keyword lookup; no vector index for this layer."""
+        words = [word for word in query.split() if word][:8]
+        if not words:
+            return []
+        # Escape LIKE metacharacters; content/query/source are searched literally.
+        with self.get_cursor() as conn:
+            clauses = []
+            params = []
+            for word in words:
+                pattern = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+                clauses.append("(query LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' OR external_source LIKE ? ESCAPE '\\')")
+                params.extend([pattern] * 3)
+            sql = "SELECT *, 'rag' AS type FROM memories_rag WHERE tenant = ? AND project_id = ? AND (" + " OR ".join(clauses) + ") ORDER BY created_at DESC LIMIT ?"
+            return [dict(row) for row in conn.execute(sql, (tenant, project_id, *params, max(1, min(limit, 100))))]
+
     def add_episodic(self, content: str, tenant: str, project_id: str,
                      salience: int = 0, goal: Optional[str] = None,
                      plan: Optional[list] = None, tool_logs: Optional[list] = None,
@@ -528,7 +570,7 @@ class DatabaseManager:
                     parent_client_id = excluded.parent_client_id,
                     last_seen = excluded.last_seen
             """, (mid, agent_id, client_name, client_id, parent_client_id, hostname, pid, status, meta_json, tenant, project_id, last_seen))
-        return {"agent_id": agent_id, "client_name": client_name, "status": status, "last_seen": last_seen, "client_id": client_id, "parent_client_id": parent_client_id}
+        return {"agent_id": agent_id, "client_name": client_name, "status": status, "last_seen": last_seen, "client_id": client_id, "parent_client_id": parent_client_id, "tenant": tenant, "project_id": project_id, "hostname": hostname, "pid": pid, "meta": meta or {}}
 
     def list_agents(self, tenant: str, project_id: str, limit: int = 200) -> List[Dict[str, Any]]:
         with self.get_cursor() as conn:
@@ -609,7 +651,7 @@ class DatabaseManager:
             event_type="quarantine:create",
             payload={"id": mid, "layer": layer, "tenant": tenant, "project_id": project_id},
         )
-        return {"id": mid, "status": "pending", "layer": layer}
+        return {"id": mid, "status": "pending", "layer": layer, "payload": payload, "tenant": tenant, "project_id": project_id, "created_at": created_at, "validation_errors": validation_errors or [], "agent_id": agent_id, "client_id": client_id, "client_name": client_name}
 
     def list_quarantine(self, tenant: str, project_id: str, status: str = "pending", limit: int = 100) -> List[Dict[str, Any]]:
         with self.get_cursor() as conn:
@@ -637,22 +679,24 @@ class DatabaseManager:
                 rows.append(d)
             return rows
 
-    def resolve_quarantine(self, item_id: str, status: str, reviewer: str) -> Optional[Dict[str, Any]]:
+    def resolve_quarantine(self, item_id: str, status: str, reviewer: str, tenant: str, project_id: str) -> Optional[Dict[str, Any]]:
+        if status not in {"approved", "rejected"}:
+            raise ValueError("Invalid review status")
         reviewed_at = datetime.datetime.now().isoformat()
         with self.get_cursor() as conn:
             conn.execute("""
                 SELECT layer, payload, tenant, project_id, agent_id, client_id, client_name
                 FROM memory_quarantine
-                WHERE id = ?
-            """, (item_id,))
+                WHERE id = ? AND tenant = ? AND project_id = ? AND status = 'pending'
+            """, (item_id, tenant, project_id))
             row = conn.fetchone()
             if not row:
                 return None
             conn.execute("""
                 UPDATE memory_quarantine
                 SET status = ?, reviewed_at = ?, reviewed_by = ?
-                WHERE id = ?
-            """, (status, reviewed_at, reviewer, item_id))
+                WHERE id = ? AND tenant = ? AND project_id = ? AND status = 'pending'
+            """, (status, reviewed_at, reviewer, item_id, tenant, project_id))
         self.add_audit_event(
             event_type=f"quarantine:{status}",
             payload={"id": item_id, "reviewed_by": reviewer},
@@ -830,6 +874,14 @@ class DatabaseManager:
         if not updates:
             return False
 
+        allowed = {
+            "semantic": {"content", "tags"},
+            "episodic": {"content", "goal", "outcome", "plan", "salience"},
+            "procedural": {"skill_name", "trigger", "steps", "description", "code_snippet"},
+            "rag": {"query", "external_source", "content"},
+        }
+        if not set(updates).issubset(allowed[layer]):
+            raise ValueError("Unsupported update field")
         # Serialize JSON fields
         serialized = {}
         for key, value in updates.items():
@@ -1178,12 +1230,12 @@ class DatabaseManager:
                 rows.append(d)
             return rows
 
-    def resolve_client_issue(self, issue_id: str, resolution: str, reviewer: str) -> Optional[Dict[str, Any]]:
+    def resolve_client_issue(self, issue_id: str, resolution: str, reviewer: str, tenant: str, project_id: str) -> Optional[Dict[str, Any]]:
         resolved_at = datetime.datetime.now().isoformat()
         with self.get_cursor() as conn:
             cur = conn.execute(
-                "UPDATE logs_client_issues SET status = 'resolved', resolved_at = ?, resolved_by = ?, resolution = ? WHERE id = ?",
-                (resolved_at, reviewer, resolution, issue_id),
+                "UPDATE logs_client_issues SET status = 'resolved', resolved_at = ?, resolved_by = ?, resolution = ? WHERE id = ? AND tenant = ? AND project_id = ? AND status = 'open'",
+                (resolved_at, reviewer, resolution, issue_id, tenant, project_id),
             )
             if cur.rowcount == 0:
                 return None

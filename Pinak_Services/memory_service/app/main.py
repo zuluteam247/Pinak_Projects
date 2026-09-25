@@ -63,6 +63,49 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Pinak Memory Service", lifespan=lifespan)
 
+class RequestSizeLimit:
+    """ASGI body cap with one response for both Content-Length and streamed bodies."""
+    def __init__(self, app, limit=1024 * 1024):
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") not in {"POST", "PUT", "PATCH"}:
+            return await self.app(scope, receive, send)
+        from starlette.responses import JSONResponse
+        headers = dict(scope.get("headers", []))
+        try:
+            if int(headers.get(b"content-length", b"0")) > self.limit:
+                return await JSONResponse({"detail": "Request body too large"}, status_code=413)(scope, receive, send)
+        except ValueError:
+            return await JSONResponse({"detail": "Invalid Content-Length"}, status_code=400)(scope, receive, send)
+        # Buffer at most limit + 1 bytes *before* invoking the application,
+        # so a chunked overflow cannot leave a half-sent response.
+        chunks = []
+        size = 0
+        while True:
+            event = await receive()
+            if event["type"] != "http.request":
+                return await JSONResponse({"detail": "Request body interrupted"}, status_code=400)(scope, receive, send)
+            chunk = event.get("body", b"")
+            size += len(chunk)
+            if size > self.limit:
+                return await JSONResponse({"detail": "Request body too large"}, status_code=413)(scope, receive, send)
+            chunks.append(chunk)
+            if not event.get("more_body", False):
+                break
+        body = b"".join(chunks)
+        first = True
+        async def replay():
+            nonlocal first
+            if first:
+                first = False
+                return {"type": "http.request", "body": body, "more_body": False}
+            return await receive()
+        return await self.app(scope, replay, send)
+
+app.add_middleware(RequestSizeLimit)
+
 @app.middleware("http")
 async def block_memory_until_verified(request: Request, call_next):
     if request.url.path.startswith("/api/v1/memory/") and getattr(request.app.state, "verification_status", "not_started") != "ready":

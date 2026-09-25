@@ -46,6 +46,8 @@ def _issue_token(tenant: str, project: str, subject: str = "tester") -> str:
         "roles": ["user"],
         "scopes": ["memory.read", "memory.write"],
         "client_name": "test-client",
+        "client_id": "parent",
+        "child_client_id": "child",
         "iat": datetime.datetime.utcnow(),
         "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=5),
     }
