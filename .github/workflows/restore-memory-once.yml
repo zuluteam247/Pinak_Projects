@@ -14,7 +14,8 @@ jobs:
       - name: Restore only malformed source
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = '4dc92683de91d931a6e98291258982535fe9e9e5'
+          git merge-base --is-ancestor 4dc92683de91d931a6e98291258982535fe9e9e5 HEAD
+          echo 'be71f9092c5ebc2cb96caca1658b19719233026dc72aebd856e281317baaf9b4  Pinak_Services/memory_service/app/services/memory_service.py' | sha256sum -c -
           git show 26d9fbb1ead171f2f56b4d0ef66bb2832c7777cd:Pinak_Services/memory_service/app/services/memory_service.py > Pinak_Services/memory_service/app/services/memory_service.py
           echo '58e03b535b75d0fff61947c2bc6c62cc213a7404e1dca8e61a26507471059c5d  Pinak_Services/memory_service/app/services/memory_service.py' | sha256sum -c -
           git config user.name 'github-actions[bot]'
