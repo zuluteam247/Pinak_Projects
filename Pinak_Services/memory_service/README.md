@@ -38,12 +38,12 @@ Launch the full Memory Command Center (Server + TUI) with a single command:
 ```bash
 ./pinak-memory
 ```
-*This handles server startup, port checking, and UI visualization automatically.*
+*Set a unique `PINAK_JWT_SECRET` first. The launcher rejects missing or known example secrets. This starts a local server and UI; it does not install a durable, round-the-clock service.*
 
 ### 🔍 Quick Context Search (CLI)
 Query your persistent context directly without the UI:
 ```bash
-export PINAK_JWT_SECRET="secret"
+export PINAK_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
 uv run python cli/main.py search "disk cleanup strategies"
 ```
 
@@ -159,8 +159,8 @@ The following files have been automatically updated to include `pinak-memory`:
 
 ### 1) Register Client
 ```bash
-export PINAK_JWT_SECRET="secret"
-TOKEN=$(python -m cli.main mint)
+export PINAK_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+TOKEN=$(uv run python -m cli.main mint demo-tenant --project demo-project)
 
 curl -sS -X POST \
   -H "Authorization: Bearer $TOKEN" \
