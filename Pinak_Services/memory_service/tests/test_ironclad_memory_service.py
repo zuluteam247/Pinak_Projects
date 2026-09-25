@@ -30,11 +30,12 @@ def test_memory_service_init_model_variants():
     svc2 = MemoryService(model=m2)
     assert svc2.embedding_dim == 384
 
-def test_load_embedding_model_exception():
+def test_load_embedding_model_exception(monkeypatch):
     svc = MemoryService()
-    with patch("app.services.memory_service.SentenceTransformer", side_effect=Exception("load fail")):
-        model = svc._load_embedding_model("some-model")
-        assert isinstance(model, _DeterministicEncoder)
+    monkeypatch.delenv("PINAK_EMBEDDING_BACKEND", raising=False)
+    with patch("sentence_transformers.SentenceTransformer", side_effect=RuntimeError("load fail")):
+        with pytest.raises(RuntimeError, match="load fail"):
+            svc._load_embedding_model("some-model")
 
 def test_verify_and_recover_triggers_rebuild(tmp_path):
     data_dir = tmp_path / "data"
