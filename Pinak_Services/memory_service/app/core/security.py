@@ -32,8 +32,8 @@ _http_bearer = HTTPBearer(auto_error=False)
 
 def _get_secret() -> str:
     secret = os.getenv("PINAK_JWT_SECRET")
-    if not secret:
-        raise RuntimeError("PINAK_JWT_SECRET environment variable must be set")
+    if not secret or secret in {"secret", "dev-secret-change-me"}:
+        raise RuntimeError("PINAK_JWT_SECRET must be set to a non-default signing secret")
     return secret
 
 
