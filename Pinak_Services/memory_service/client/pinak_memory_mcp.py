@@ -9,7 +9,7 @@ mcp = FastMCP("Pinak Memory")
 
 # Configuration
 API_BASE_URL = os.getenv("PINAK_API_URL", "http://localhost:8000/api/v1")
-PINAK_SECRET = os.getenv("PINAK_JWT_SECRET", "secret")  # Default for dev
+PINAK_SECRET = os.getenv("PINAK_JWT_SECRET")
 PINAK_PROJECT_ID = os.getenv("PINAK_PROJECT_ID", "pinak-memory")
 PINAK_CLIENT_NAME = os.getenv("PINAK_CLIENT_NAME", "unknown-client")
 PINAK_CLIENT_ID = os.getenv("PINAK_CLIENT_ID", PINAK_CLIENT_NAME)
@@ -50,6 +50,8 @@ def _get_token() -> str:
             token = token[7:].strip()
         return token
     from datetime import datetime, timezone, timedelta
+    if not PINAK_SECRET or PINAK_SECRET in {"secret", "dev-secret-change-me"}:
+        raise RuntimeError("Set a non-default PINAK_JWT_SECRET or provide PINAK_JWT_TOKEN")
 
     payload = {
         "sub": "pinak-agent-001",
