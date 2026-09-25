@@ -12,12 +12,15 @@ TENANT = "default"
 PROJECT = "pinak-history"
 
 def get_token():
-    secret = os.getenv("PINAK_JWT_SECRET", "secret")
+    secret = os.getenv("PINAK_JWT_SECRET")
+    if not secret or secret in {"secret", "dev-secret-change-me"}:
+        raise RuntimeError("Set a non-default PINAK_JWT_SECRET")
     algo = os.getenv("PINAK_JWT_ALGORITHM", "HS256")
     payload = {
         "tenant_id": TENANT,
         "project_id": PROJECT,
         "role": "agent",
+        "scopes": ["memory.write"],
         "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
     }
     return jwt.encode(payload, secret, algorithm=algo)
