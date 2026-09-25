@@ -39,7 +39,7 @@ uv sync --frozen
 uv sync --project Pinak_Services/memory_service --no-dev --frozen
 
 # Configure authentication secret (generate a strong value in production)
-export PINAK_JWT_SECRET="dev-secret-change-me"
+export PINAK_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
 
 # Run the service
 uv run --project Pinak_Services/memory_service uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
@@ -47,32 +47,21 @@ uv run --project Pinak_Services/memory_service uvicorn app.main:app --host 0.0.0
 
 ### Authentication & Multi-Tenancy
 
-All API routes require a Bearer JWT. The token **must** include `tenant` (or `tenant_id`) and `project_id` claims; data is stored and retrieved from segregated directories derived from these values.
+All API routes require a Bearer JWT. The token **must** include `tenant` (or `tenant_id`) and `project_id` claims; SQLite rows are scoped by these values, and vector search filters candidates by the tenant/project before ranking. The vector index and hash-chained audit table are shared, not separate tenant directories.
 
-In development you can mint a token with:
+In development, with a unique secret set above, mint a scoped token from the service directory:
 
 ```bash
-python - <<'PY'
-import datetime, jwt
-token = jwt.encode(
-    {
-        "sub": "local-dev",
-        "tenant": "demo-tenant",
-        "project_id": "demo-project",
-        "iat": datetime.datetime.utcnow(),
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1),
-    },
-    "dev-secret-change-me",
-    algorithm="HS256",
-)
-print(token)
-PY
+cd Pinak_Services/memory_service
+TOKEN=$(uv run python -m cli.main mint demo-tenant --project demo-project)
 ```
+
+The CLI token has `memory.read` and `memory.write` scopes. Keep both the signing secret and token out of source control and chat. The public example secrets in older versions are rejected.
 
 Then export it for subsequent requests:
 
 ```bash
-export PINAK_DEV_TOKEN="<token-from-command-above>"
+export PINAK_DEV_TOKEN="$TOKEN"
 ```
 
 Use the generated value in the `Authorization: Bearer <token>` header when calling the API.
@@ -165,10 +154,10 @@ uv run --project Pinak_Services/memory_service python ../../scripts/demo_all_lay
 
 - **Local-First**: All data stored locally by default
 - **JWT Guarded Endpoints**: All memory APIs enforce Bearer token validation
-- **Tamper-Evident**: Hash-chained audit logs for events
-- **Tenant Isolation**: File-system level segregation by `tenant` and `project_id`
+- **Audit Integrity**: Hash-chained global audit entries with a verifier for retained rows; no external head-hash anchor yet, so deleted tails cannot be detected
+- **Tenant Isolation**: Tenant/project-filtered SQLite queries and vector candidates; the SQLite database and vector index remain shared
 - **Privacy**: Configurable redaction rules
-- **Compliance**: GDPR, SOC2, and enterprise-ready
+- **Compliance**: No certification or compliance attestation is provided by this repository
 
 See [SECURITY.md](SECURITY.md) for details.
 
