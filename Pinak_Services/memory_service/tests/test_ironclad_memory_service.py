@@ -59,6 +59,20 @@ def test_verify_and_recover_triggers_rebuild(tmp_path):
             svc.verify_and_recover()
             mock_rebuild.assert_called_once()
 
+def test_verify_and_recover_rebuilds_equal_count_wrong_ids(tmp_path, monkeypatch):
+    monkeypatch.setenv("PINAK_EMBEDDING_BACKEND", "dummy")
+    config = {"data_root": str(tmp_path / "data"), "embedding_model": "dummy"}
+    with patch("app.services.memory_service.MemoryService._load_config", return_value=config):
+        svc = MemoryService()
+    svc.db.add_semantic("correct memory", [], "t", "p", 123)
+    svc.vector_store.add_vectors(np.ones((1, svc.embedding_dim), dtype=np.float32), [456])
+    svc.vector_store.save()
+    assert svc.vector_store.total == 1
+    svc.verify_and_recover()
+    assert svc.vector_store.ids.tolist() == [123]
+    assert svc.vector_store.total == 1
+
+
 def test_update_memory_edge_cases():
     svc = MemoryService()
     # 1. Forbidden keys only
