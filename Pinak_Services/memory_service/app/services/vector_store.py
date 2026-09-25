@@ -4,6 +4,7 @@ import threading
 import logging
 import time
 import json
+import tempfile
 from typing import List, Tuple, Optional, Dict, Any
 from contextlib import contextmanager
 
@@ -49,8 +50,12 @@ class VectorStore:
             if load_path:
                 try:
                     data = np.load(load_path, allow_pickle=True).item()
-                    self.vectors = data['vectors'].astype(np.float32)
-                    self.ids = data['ids'].astype(np.int64)
+                    vectors = np.asarray(data['vectors'], dtype=np.float32)
+                    ids = np.asarray(data['ids'], dtype=np.int64)
+                    if vectors.ndim != 2 or vectors.shape[1] != self.dimension or len(vectors) != len(ids):
+                        raise ValueError("Vector index shape or dimension mismatch")
+                    self.vectors = vectors
+                    self.ids = ids
                     self.norms = np.sum(np.square(self.vectors), axis=1)
                     logger.info(f"Loaded Vector Store from {load_path}. Size: {len(self.ids)}")
                 except Exception as e:
@@ -75,8 +80,24 @@ class VectorStore:
                 dirpath = os.path.dirname(self.index_path)
                 if dirpath:
                     os.makedirs(dirpath, exist_ok=True)
-                with open(self.index_path, "wb") as handle:
-                    np.save(handle, {'vectors': self.vectors, 'ids': self.ids})
+                # Write a complete snapshot, fsync it, then atomically swap it
+                # into place. A crash cannot truncate the last good index.
+                fd, temporary = tempfile.mkstemp(prefix=".vectors-", dir=dirpath or ".")
+                try:
+                    with os.fdopen(fd, "wb") as handle:
+                        np.save(handle, {'vectors': self.vectors, 'ids': self.ids})
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(temporary, self.index_path)
+                    if hasattr(os, "O_DIRECTORY"):
+                        directory_fd = os.open(dirpath or ".", os.O_RDONLY | os.O_DIRECTORY)
+                        try:
+                            os.fsync(directory_fd)
+                        finally:
+                            os.close(directory_fd)
+                finally:
+                    if os.path.exists(temporary):
+                        os.unlink(temporary)
                 self.needs_save = False
                 logger.info(f"Saved Vector Store to {self.index_path}. Size: {len(self.ids)}")
 
