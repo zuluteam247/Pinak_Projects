@@ -138,11 +138,14 @@ def tui():
 @app.command()
 def mint(tenant: str, project: str = "default", secret: str = None):
     """Mint a development JWT token."""
-    jwt_secret = secret or os.environ.get("PINAK_JWT_SECRET", "dev-secret-change-me")
+    jwt_secret = secret or os.environ.get("PINAK_JWT_SECRET")
+    if not jwt_secret or jwt_secret in {"secret", "dev-secret-change-me"}:
+        raise typer.BadParameter("Set a non-default PINAK_JWT_SECRET")
     payload = {
         "sub": "local-dev",
         "tenant": tenant,
         "project_id": project,
+        "scopes": ["memory.read", "memory.write"],
         "iat": datetime.datetime.utcnow(),
         "exp": datetime.datetime.utcnow() + datetime.timedelta(days=30),
     }
@@ -152,11 +155,14 @@ def mint(tenant: str, project: str = "default", secret: str = None):
 @app.command()
 def search(query: str, tenant: str = "demo", project: str = "default", url: str = "http://localhost:8001"):
     """Perform a hybrid search (RRF) across all memory layers."""
-    token_secret = os.environ.get("PINAK_JWT_SECRET", "dev-secret-change-me")
+    token_secret = os.environ.get("PINAK_JWT_SECRET")
+    if not token_secret or token_secret in {"secret", "dev-secret-change-me"}:
+        raise typer.BadParameter("Set a non-default PINAK_JWT_SECRET")
     token_payload = {
         "sub": "search-cli",
         "tenant": tenant,
         "project_id": project,
+        "scopes": ["memory.read"],
         "iat": datetime.datetime.utcnow(),
         "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=5),
     }
