@@ -1,0 +1,52 @@
+name: One-time Pinak lock repair
+
+on:
+  workflow_dispatch:
+
+jobs:
+  repair:
+    if: github.ref == 'refs/heads/main' && github.repository == 'zuluteam247/Pinak_Projects'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.12.4'
+      - name: Regenerate from project metadata without reading the partial lock
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pinak-repair/Pinak_Services/memory_service
+          cp pyproject.toml README.md /tmp/pinak-repair/
+          cp Pinak_Services/memory_service/pyproject.toml /tmp/pinak-repair/Pinak_Services/memory_service/
+          uv lock --project /tmp/pinak-repair/Pinak_Services/memory_service --python 3.12
+          echo '60e97c61a1da18d9ffa89024e60e991bc757904fdce7a957a880206a421b0ba5  /tmp/pinak-repair/uv.lock' | sha256sum -c -
+          cp /tmp/pinak-repair/uv.lock uv.lock
+          uv lock --check --project Pinak_Services/memory_service
+      - name: Install and test the exact repaired lock
+        run: |
+          set -euo pipefail
+          uv sync --project Pinak_Services/memory_service --extra tests --frozen
+          uv run --project Pinak_Services/memory_service --extra tests --frozen pytest Pinak_Services/memory_service/tests/ -q --tb=short
+      - name: Audit the exact repaired base dependency set
+        run: |
+          set -euo pipefail
+          python -m pip install pip-audit
+          uv export --project Pinak_Services/memory_service --frozen --no-dev --format requirements.txt --no-emit-project --no-emit-workspace --no-hashes --output-file /tmp/pinak-requirements.txt
+          pip-audit --no-deps -r /tmp/pinak-requirements.txt
+      - name: Commit only the verified lock
+        run: |
+          set -euo pipefail
+          echo '60e97c61a1da18d9ffa89024e60e991bc757904fdce7a957a880206a421b0ba5  uv.lock' | sha256sum -c -
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uv.lock
+          git diff --cached --quiet && { echo 'No lockfile change to commit'; exit 1; }
+          git commit -m 'Repair and verify Pinak dependency lock'
+          git push origin HEAD:main
