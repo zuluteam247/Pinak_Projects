@@ -25,7 +25,10 @@ SERVER_PORT="${PINAK_BIND_PORT:-8000}"
 SERVER_HOST="${PINAK_BIND_HOST:-127.0.0.1}"
 VENV_PY="${PINAK_VENV_PY:-$BASE_DIR/.venv/bin/python}"
 
-export PINAK_JWT_SECRET="${PINAK_JWT_SECRET:-secret}"
+if [ -z "${PINAK_JWT_SECRET:-}" ] || [ "$PINAK_JWT_SECRET" = "secret" ] || [ "$PINAK_JWT_SECRET" = "dev-secret-change-me" ]; then
+  echo "PINAK_JWT_SECRET must be set to a non-default signing secret" >&2
+  exit 1
+fi
 export PINAK_API_URL="${PINAK_API_URL:-http://127.0.0.1:${SERVER_PORT}/api/v1}"
 export PINAK_PROJECT_ID="${PINAK_PROJECT_ID:-pinak-memory}"
 
