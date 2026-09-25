@@ -93,6 +93,14 @@ scripts/pinak-unlock.sh
 
 ---
 
+## Integrity and readiness limits
+
+`/api/v1/live` means the HTTP process responds. `/api/v1/health` returns HTTP 200 only after startup verification succeeds; while verification is pending, failed, or explicitly skipped, it returns HTTP 503. Memory API routes are also unavailable until readiness. The server launcher enables background verification by default, so callers must wait for readiness before sending memory requests.
+
+Startup verification compares the multiset of database embedding IDs with the IDs in the NumPy vector snapshot and rebuilds the snapshot on a mismatch. This does **not** detect a vector with the correct ID but stale or corrupted vector values: the current snapshot has no independently checked per-record content digest. Backups and restore need a separate tested operating procedure; a passing health check does not prove backup recoverability.
+
+The audit verifier checks the hash chain for retained rows. An attacker with write access to SQLite can delete the latest audit rows and leave a valid-looking shorter chain; local verification cannot detect that silent tail deletion. Stronger tamper evidence needs a separately controlled, append-only destination for the head digest, a defined anchoring cadence and custodian, and a restore-time comparison against that external anchor. No external anchor is configured here, and a head stored beside the mutable database would not close this gap.
+
 ## 💾 Daily Backups (Google Drive)
 - Backup script: `scripts/pinak-memory-backup.sh`
 - LaunchAgent: `com.pinak.memory.backup.plist`
