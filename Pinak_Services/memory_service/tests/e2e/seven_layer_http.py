@@ -1,4 +1,4 @@
-import datetime, json
+import datetime, json, os
 import httpx,jwt
 from pathlib import Path
 base=os.environ.get('PINAK_API_URL', 'http://127.0.0.1:18765/api/v1'); secret=os.environ['PINAK_JWT_SECRET']
