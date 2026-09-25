@@ -271,6 +271,28 @@ class DatabaseManager:
                 ON memory_quarantine (status);
             """)
 
+            # Explicit cross-layer membership. IDs do not imply shared identity on their own.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memory_units (
+                    id TEXT NOT NULL, tenant TEXT NOT NULL, project_id TEXT NOT NULL,
+                    label TEXT NOT NULL, created_at TEXT NOT NULL,
+                    PRIMARY KEY (id, tenant, project_id)
+                );
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memory_unit_members (
+                    unit_id TEXT NOT NULL, layer TEXT NOT NULL, record_id TEXT NOT NULL,
+                    tenant TEXT NOT NULL, project_id TEXT NOT NULL, role TEXT NOT NULL,
+                    PRIMARY KEY (unit_id, layer, record_id, tenant, project_id),
+                    UNIQUE (layer, record_id, tenant, project_id),
+                    FOREIGN KEY (unit_id, tenant, project_id)
+                      REFERENCES memory_units (id, tenant, project_id)
+                );
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memory_unit_record
+                ON memory_unit_members (tenant, project_id, layer, record_id);
+            """)
             # 11. Audit Log (Tamper-evident)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS logs_audit (
@@ -708,6 +730,92 @@ class DatabaseManager:
             except Exception:
                 d["payload"] = {}
         return d
+
+    _UNIT_TABLES = {
+        "semantic": "memories_semantic", "episodic": "memories_episodic",
+        "procedural": "memories_procedural", "rag": "memories_rag",
+        "working": "working_memory", "session": "logs_session", "event": "logs_events",
+    }
+
+    def create_memory_unit(self, label: str, members: List[Dict[str, str]], tenant: str,
+                           project_id: str) -> Dict[str, Any]:
+        """Attach existing scoped records to one explicit unit, atomically.
+
+        Only the admin API exposes this write. A member belongs to at most one
+        unit; caller-supplied UUIDs or labels never establish identity alone.
+        """
+        if not isinstance(label, str) or not label.strip() or len(label) > 256:
+            raise ValueError("Unit label must be 1-256 characters")
+        if not isinstance(members, list) or not 1 <= len(members) <= 100:
+            raise ValueError("Expected 1-100 members")
+        validated = []
+        for item in members:
+            if not isinstance(item, dict) or set(item) != {"layer", "id", "role"}:
+                raise ValueError("Member requires layer, id and role")
+            layer, rid, role = item["layer"], item["id"], item["role"]
+            if layer not in self._UNIT_TABLES or not isinstance(rid, str) or not rid:
+                raise ValueError("Invalid member layer or ID")
+            if not isinstance(role, str) or not role.strip() or len(role) > 64:
+                raise ValueError("Member role must be 1-64 characters")
+            validated.append((layer, rid, role.strip()))
+        if len({(a, b) for a, b, _ in validated}) != len(validated):
+            raise ValueError("Duplicate member")
+        unit_id = str(uuid.uuid4())
+        created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        try:
+            with self.get_cursor() as cur:
+                cur.execute("BEGIN IMMEDIATE")
+                for layer, rid, _ in validated:
+                    table = self._UNIT_TABLES[layer]  # constant allowlist, never client SQL
+                    exists = cur.execute(
+                        f"SELECT 1 FROM {table} WHERE id=? AND tenant=? AND project_id=?",
+                        (rid, tenant, project_id),
+                    ).fetchone()
+                    if not exists:
+                        raise ValueError("Member not found in this tenant/project")
+                cur.execute("INSERT INTO memory_units VALUES (?, ?, ?, ?, ?)",
+                            (unit_id, tenant, project_id, label.strip(), created_at))
+                for layer, rid, role in validated:
+                    cur.execute("INSERT INTO memory_unit_members VALUES (?, ?, ?, ?, ?, ?)",
+                                (unit_id, layer, rid, tenant, project_id, role))
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Member already belongs to a unit") from exc
+        self.add_audit_event("memory_unit:create", {"unit_id": unit_id, "member_count": len(validated)})
+        return {"id": unit_id, "label": label.strip(), "members": members,
+                "tenant": tenant, "project_id": project_id}
+
+    def related_memory(self, layer: str, record_id: str, tenant: str,
+                       project_id: str) -> Optional[Dict[str, Any]]:
+        if layer not in self._UNIT_TABLES:
+            raise ValueError("Unsupported layer")
+        with self.get_cursor() as cur:
+            # Stale memberships must never act as an alternate key for a deleted
+            # record, even while other siblings still exist.
+            source_table = self._UNIT_TABLES[layer]
+            if not cur.execute(f"SELECT 1 FROM {source_table} WHERE id=? AND tenant=? AND project_id=?",
+                               (record_id, tenant, project_id)).fetchone():
+                return None
+            unit = cur.execute("""
+                SELECT u.id, u.label FROM memory_unit_members m JOIN memory_units u
+                ON u.id=m.unit_id AND u.tenant=m.tenant AND u.project_id=m.project_id
+                WHERE m.tenant=? AND m.project_id=? AND m.layer=? AND m.record_id=?
+            """, (tenant, project_id, layer, record_id)).fetchone()
+            if not unit:
+                return None
+            members = cur.execute("""
+                SELECT layer, record_id, role FROM memory_unit_members
+                WHERE unit_id=? AND tenant=? AND project_id=? ORDER BY layer, record_id
+            """, (unit["id"], tenant, project_id)).fetchall()
+            # Filter dangling records, including expired working/session rows.
+            live = []
+            for member in members:
+                table = self._UNIT_TABLES[member["layer"]]
+                row = cur.execute(f"SELECT * FROM {table} WHERE id=? AND tenant=? AND project_id=?",
+                                  (member["record_id"], tenant, project_id)).fetchone()
+                if row:
+                    live.append({"layer": member["layer"], "role": member["role"],
+                                 "record": dict(row)})
+            return {"id": unit["id"], "label": unit["label"], "members": live}
 
     def add_audit_event(self, event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Append to the global chain atomically, ordered by SQLite insertion rowid."""

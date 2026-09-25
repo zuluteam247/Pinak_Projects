@@ -465,6 +465,40 @@ def verify_maintenance(
     service.verify_and_recover()
     return {"audit": audit, "vectors_checked": service.vector_enabled, "condensed": False}
 
+@router.post("/units", status_code=status.HTTP_201_CREATED)
+def create_memory_unit(
+    payload: Dict[str, Any] = Body(...),
+    ctx: AuthContext = Depends(require_auth_context),
+    service: MemoryService = Depends(get_memory_service),
+):
+    """Admin-reviewed association among already-written scoped records."""
+    require_scope(ctx, "memory.admin")
+    require_role(ctx, "admin")
+    if set(payload) != {"label", "members"}:
+        raise HTTPException(status_code=400, detail="Expected label and members")
+    try:
+        return service.db.create_memory_unit(payload["label"], payload["members"],
+                                             ctx.tenant_id, ctx.project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/units/related/{layer}/{record_id}")
+def related_memory(
+    layer: str, record_id: str,
+    ctx: AuthContext = Depends(require_auth_context),
+    service: MemoryService = Depends(get_memory_service),
+):
+    require_scope(ctx, "memory.read")
+    try:
+        unit = service.db.related_memory(layer, record_id, ctx.tenant_id, ctx.project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if unit is None:
+        raise HTTPException(status_code=404, detail="No related unit")
+    return unit
+
+
 @router.get("/{layer}/{memory_id}")
 def get_memory_by_id(
     layer: str,
