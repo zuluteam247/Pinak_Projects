@@ -707,6 +707,18 @@ class DatabaseManager:
             """, (mid, query, external_source, content, agent_id, client_id, client_name, tenant, project_id, created_at))
         return {"id": mid, "query": query}
 
+    def list_embedding_ids(self, tenant: str, project_id: str) -> set[int]:
+        """Return only vectors owned by a tenant/project, across indexed layers."""
+        with self.get_cursor() as cur:
+            ids = set()
+            for table in ("memories_semantic", "memories_episodic", "memories_procedural"):
+                cur.execute(
+                    f"SELECT embedding_id FROM {table} WHERE tenant = ? AND project_id = ? AND embedding_id IS NOT NULL",
+                    (tenant, project_id),
+                )
+                ids.update(int(row[0]) for row in cur.fetchall())
+            return ids
+
     def get_memories_by_embedding_ids(self, embedding_ids: List[int], tenant: str, project_id: str) -> List[Dict[str, Any]]:
         # Efficient retrieval for vector search results
         if not embedding_ids:
