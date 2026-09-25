@@ -4,7 +4,7 @@ import os
 import sys
 import json
 import sqlite3
-import faiss
+import numpy as np
 from typing import Optional
 from pathlib import Path
 
@@ -24,7 +24,7 @@ def _get_db_path():
     return "data/memory.db"
 
 def _get_vector_path():
-    return "data/vectors.index"
+    return "data/vectors.index.npy"
 
 @app.command()
 def start(
@@ -65,8 +65,17 @@ def doctor(fix: bool = False):
         issues.append(f"Vector Index not found at {vec_path}")
     else:
         try:
-            index = faiss.read_index(vec_path)
-            typer.echo(f"✅ Vector Index OK (Size: {index.ntotal})")
+            # This service persists NumPy snapshots, not FAISS indexes.
+            from app.services.vector_store import VectorStore
+            with open(vec_path, "rb") as handle:
+                snapshot = np.load(handle, allow_pickle=True).item()
+            vectors = np.asarray(snapshot["vectors"])
+            if vectors.ndim != 2 or vectors.shape[1] < 1:
+                raise ValueError("Invalid vector snapshot shape")
+            index = VectorStore(vec_path, vectors.shape[1])
+            if index.total != len(snapshot["ids"]):
+                raise ValueError("Invalid vector snapshot IDs")
+            typer.echo(f"Vector Index OK (Size: {index.total})")
 
             # Check Consistency
             if os.path.exists(db_path):
@@ -76,8 +85,8 @@ def doctor(fix: bool = False):
                 db_count = cursor.fetchone()[0]
                 conn.close()
 
-                if db_count != index.ntotal:
-                    msg = f"Inconsistency detected: DB has {db_count} embeddings, Vector Index has {index.ntotal}"
+                if db_count != index.total:
+                    msg = f"Inconsistency detected: DB has {db_count} embeddings, Vector Index has {index.total}"
                     issues.append(msg)
                     if fix:
                         typer.echo("Attempting fix... (Not implemented: requires re-indexing from DB)")
