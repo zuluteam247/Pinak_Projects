@@ -31,3 +31,25 @@ def test_failed_swap_preserves_last_good_index(tmp_path):
     assert not list(tmp_path.glob('.vectors-*'))
     store.save()
     assert VectorStore(path, 2).total == 2
+
+
+def test_cli_doctor_reads_numpy_snapshot(tmp_path, monkeypatch, capsys):
+    import sqlite3
+    from app.core.database import DatabaseManager
+    from cli import main as cli
+    db_path = str(tmp_path / "memory.db")
+    DatabaseManager(db_path)
+    index_path = str(tmp_path / "vectors.index.npy")
+    store = VectorStore(index_path, 2)
+    store.save()
+    # Empty stores only create a snapshot once modified.
+    store.add_vectors(np.array([[1, 2]], dtype=np.float32), [17])
+    store.save()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO memories_semantic (id, content, tenant, project_id, created_at, embedding_id) VALUES (?, ?, ?, ?, ?, ?)", ("m1", "one", "t", "p", "now", 17))
+    monkeypatch.setattr(cli, "_get_db_path", lambda: db_path)
+    monkeypatch.setattr(cli, "_get_vector_path", lambda: index_path)
+    cli.doctor()
+    output = capsys.readouterr().out
+    assert "Vector Index OK (Size: 1)" in output
+    assert "Inconsistency detected" not in output
