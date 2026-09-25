@@ -10,7 +10,7 @@ from pathlib import Path
 # Config
 # We can use the running server or default
 API_URL = "http://localhost:8000/api/v1"
-JWT_SECRET = os.getenv("PINAK_JWT_SECRET", "secret")
+JWT_SECRET = os.getenv("PINAK_JWT_SECRET")
 PROJECT_ID = "pinak-history"  # Keep it consistent 
 TENANT = "default"
 
@@ -18,6 +18,8 @@ KNOWLEDGE_ROOT = os.path.expanduser("~/.gemini/antigravity/knowledge/")
 BRAIN_ROOT = os.path.expanduser("~/.gemini/antigravity/brain/")
 
 def mint_token() -> str:
+    if not JWT_SECRET or JWT_SECRET in {"secret", "dev-secret-change-me"}:
+        raise RuntimeError("Set a non-default PINAK_JWT_SECRET")
     payload = {
         "sub": "ingest-script",
         "tenant": TENANT,
