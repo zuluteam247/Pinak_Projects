@@ -198,23 +198,20 @@ class MemoryService:
         if not self.vector_enabled:
             logger.info("Vector store disabled (backend=%s); skipping verify/recover", self.embedding_backend)
             return
-        # Simple heuristic: Count embeddings across all layers.
-        db_count = 0
+        # Compare the full ID multiset, not just row counts. Equal-sized but
+        # mismatched snapshots silently return the wrong memory on retrieval.
+        db_ids = []
         with self.db.get_cursor() as conn:
-            for table in ["memories_semantic", "memories_episodic", "memories_procedural"]:
-                try:
-                    conn.execute(f"SELECT count(*) FROM {table} WHERE embedding_id IS NOT NULL")
-                    db_count += conn.fetchone()[0]
-                except sqlite3.OperationalError:
-                    continue
-
-        vec_count = self.vector_store.total
-
-        if db_count != vec_count:
-            logger.warning(f"Consistency Mismatch! DB: {db_count}, Vector: {vec_count}. Rebuilding Index...")
+            for table in ("memories_semantic", "memories_episodic", "memories_procedural"):
+                conn.execute(f"SELECT embedding_id FROM {table} WHERE embedding_id IS NOT NULL")
+                db_ids.extend(int(row[0]) for row in conn.fetchall())
+        with self.vector_store.lock:
+            vector_ids = [int(value) for value in self.vector_store.ids]
+        if sorted(db_ids) != sorted(vector_ids):
+            logger.warning("Vector ID mismatch: DB=%s, vector=%s; rebuilding index", len(db_ids), len(vector_ids))
             self._rebuild_index()
         else:
-            logger.info(f"System Consistent. {vec_count} memories loaded.")
+            logger.info("System Consistent. %s memories loaded.", len(vector_ids))
 
     def _rebuild_index(self):
         """Re-encode all semantic/episodic/procedural memories and rebuild vector store."""
