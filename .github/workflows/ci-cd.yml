@@ -24,14 +24,14 @@ jobs:
         enable-cache: true
     - name: Install dependencies
       run: |
-        uv sync --project Pinak_Services/memory_service --extra tests
+        uv sync --extra tests
     - name: Run tests
       run: |
-        uv run --project Pinak_Services/memory_service pytest tests/ -v --tb=short
+        uv run pytest tests/ -v --tb=short
     - name: Lint with flake8
       run: |
-        uv run --project Pinak_Services/memory_service flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        uv run --project Pinak_Services/memory_service flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        uv run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        uv run flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
   build:
     runs-on: ubuntu-latest
