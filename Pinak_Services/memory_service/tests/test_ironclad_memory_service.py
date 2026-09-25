@@ -1,5 +1,7 @@
 import os
 import pytest
+import sys
+import types
 import numpy as np
 from unittest.mock import MagicMock, patch
 from app.services.memory_service import MemoryService, _DeterministicEncoder
@@ -33,7 +35,12 @@ def test_memory_service_init_model_variants():
 def test_load_embedding_model_exception(monkeypatch):
     svc = MemoryService()
     monkeypatch.delenv("PINAK_EMBEDDING_BACKEND", raising=False)
-    with patch("sentence_transformers.SentenceTransformer", side_effect=RuntimeError("load fail")):
+    def fail_model(_name):
+        raise RuntimeError("load fail")
+
+    fake_module = types.ModuleType("sentence_transformers")
+    fake_module.SentenceTransformer = fail_model
+    with patch.dict(sys.modules, {"sentence_transformers": fake_module}):
         with pytest.raises(RuntimeError, match="load fail"):
             svc._load_embedding_model("some-model")
 
