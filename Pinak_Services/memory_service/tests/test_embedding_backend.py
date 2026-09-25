@@ -1,5 +1,7 @@
 import os
 import pytest
+import sys
+import types
 from unittest.mock import patch
 
 from app.services.memory_service import MemoryService
@@ -67,7 +69,12 @@ def test_dummy_backend_never_imports_optional_model(tmp_path, monkeypatch):
 def test_real_model_loader_error_is_not_silently_dummy(tmp_path, monkeypatch):
     config = {"data_root": str(tmp_path / "data"), "embedding_model": "broken-model"}
     monkeypatch.delenv("PINAK_EMBEDDING_BACKEND", raising=False)
-    with patch("app.services.memory_service.MemoryService._load_config", return_value=config):
-        with patch("sentence_transformers.SentenceTransformer", side_effect=RuntimeError("model unavailable")):
+    def fail_model(_name):
+        raise RuntimeError("model unavailable")
+
+    fake_module = types.ModuleType("sentence_transformers")
+    fake_module.SentenceTransformer = fail_model
+    with patch.dict(sys.modules, {"sentence_transformers": fake_module}):
+        with patch("app.services.memory_service.MemoryService._load_config", return_value=config):
             with pytest.raises(RuntimeError, match="model unavailable"):
                 MemoryService()
