@@ -8,17 +8,23 @@ WORKDIR /code
 RUN pip install --no-cache-dir uv
 
 # Copy project metadata for dependency installation first (leverages Docker layer caching)
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 COPY Pinak_Services/memory_service/pyproject.toml Pinak_Services/memory_service/pyproject.toml
 
 # Install runtime dependencies into a managed virtual environment
-RUN uv sync --frozen --project Pinak_Services/memory_service --no-dev
+RUN uv sync --frozen --project Pinak_Services/memory_service --no-dev --no-install-workspace
 
 # Copy the application source code
 COPY Pinak_Services/memory_service/app Pinak_Services/memory_service/app
+COPY Pinak_Services/memory_service/schemas Pinak_Services/memory_service/schemas
+# Install the service package only after its source exists. Keep root package
+# out of this image; the API imports only app.*.
+RUN uv sync --frozen --project Pinak_Services/memory_service --no-dev --no-install-package pinak-project
+WORKDIR /code/Pinak_Services/memory_service
 
 # Expose the port the app runs on
 EXPOSE 8000
 
 # Run the FastAPI application via uv to ensure the managed environment is used
-CMD ["uv", "run", "--project", "Pinak_Services/memory_service", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENV PINAK_EMBEDDING_BACKEND=dummy
+CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
