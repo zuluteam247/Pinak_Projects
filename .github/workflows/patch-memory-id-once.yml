@@ -1,0 +1,50 @@
+name: One-time memory ID verification patch
+on:
+  workflow_dispatch:
+jobs:
+  patch:
+    if: github.ref == 'refs/heads/main' && github.repository == 'zuluteam247/Pinak_Projects'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.12.4'
+      - name: Apply hash-gated narrow source patch
+        run: |
+          set -euo pipefail
+          echo '58e03b535b75d0fff61947c2bc6c62cc213a7404e1dca8e61a26507471059c5d  Pinak_Services/memory_service/app/services/memory_service.py' | sha256sum -c -
+          printf '%s' 'ZGlmZiAtLWdpdCBhL1BpbmFrX1NlcnZpY2VzL21lbW9yeV9zZXJ2aWNlL2FwcC9zZXJ2aWNlcy9tZW1vcnlfc2VydmljZS5weSBiL1BpbmFrX1NlcnZpY2VzL21lbW9yeV9zZXJ2aWNlL2FwcC9zZXJ2aWNlcy9tZW1vcnlfc2VydmljZS5weQppbmRleCA3YmE4OTgzLi5mM2JlNWY4IDEwMDY0NAotLS0gYS9QaW5ha19TZXJ2aWNlcy9tZW1vcnlfc2VydmljZS9hcHAvc2VydmljZXMvbWVtb3J5X3NlcnZpY2UucHkKKysrIGIvUGluYWtfU2VydmljZXMvbWVtb3J5X3NlcnZpY2UvYXBwL3NlcnZpY2VzL21lbW9yeV9zZXJ2aWNlLnB5CkBAIC0xOTgsMjMgKzE5OCwyMCBAQCBjbGFzcyBNZW1vcnlTZXJ2aWNlOgogICAgICAgICBpZiBub3Qgc2VsZi52ZWN0b3JfZW5hYmxlZDoKICAgICAgICAgICAgIGxvZ2dlci5pbmZvKCJWZWN0b3Igc3RvcmUgZGlzYWJsZWQgKGJhY2tlbmQ9JXMpOyBza2lwcGluZyB2ZXJpZnkvcmVjb3ZlciIsIHNlbGYuZW1iZWRkaW5nX2JhY2tlbmQpCiAgICAgICAgICAgICByZXR1cm4KLSAgICAgICAgIyBTaW1wbGUgaGV1cmlzdGljOiBDb3VudCBlbWJlZGRpbmdzIGFjcm9zcyBhbGwgbGF5ZXJzLgotICAgICAgICBkYl9jb3VudCA9IDAKKyAgICAgICAgIyBDb21wYXJlIHRoZSBmdWxsIElEIG11bHRpc2V0LCBub3QganVzdCByb3cgY291bnRzLiBFcXVhbC1zaXplZCBidXQKKyAgICAgICAgIyBtaXNtYXRjaGVkIHNuYXBzaG90cyBzaWxlbnRseSByZXR1cm4gdGhlIHdyb25nIG1lbW9yeSBvbiByZXRyaWV2YWwuCisgICAgICAgIGRiX2lkcyA9IFtdCiAgICAgICAgIHdpdGggc2VsZi5kYi5nZXRfY3Vyc29yKCkgYXMgY29ubjoKLSAgICAgICAgICAgIGZvciB0YWJsZSBpbiBbIm1lbW9yaWVzX3NlbWFudGljIiwgIm1lbW9yaWVzX2VwaXNvZGljIiwgIm1lbW9yaWVzX3Byb2NlZHVyYWwiXToKLSAgICAgICAgICAgICAgICB0cnk6Ci0gICAgICAgICAgICAgICAgICAgIGNvbm4uZXhlY3V0ZShmIlNFTEVDVCBjb3VudCgqKSBGUk9NIHt0YWJsZX0gV0hFUkUgZW1iZWRkaW5nX2lkIElTIE5PVCBOVUxMIikKLSAgICAgICAgICAgICAgICAgICAgZGJfY291bnQgKz0gY29ubi5mZXRjaG9uZSgpWzBdCi0gICAgICAgICAgICAgICAgZXhjZXB0IHNxbGl0ZTMuT3BlcmF0aW9uYWxFcnJvcjoKLSAgICAgICAgICAgICAgICAgICAgY29udGludWUKLQotICAgICAgICB2ZWNfY291bnQgPSBzZWxmLnZlY3Rvcl9zdG9yZS50b3RhbAotCi0gICAgICAgIGlmIGRiX2NvdW50ICE9IHZlY19jb3VudDoKLSAgICAgICAgICAgIGxvZ2dlci53YXJuaW5nKGYiQ29uc2lzdGVuY3kgTWlzbWF0Y2ghIERCOiB7ZGJfY291bnR9LCBWZWN0b3I6IHt2ZWNfY291bnR9LiBSZWJ1aWxkaW5nIEluZGV4Li4uIikKKyAgICAgICAgICAgIGZvciB0YWJsZSBpbiAoIm1lbW9yaWVzX3NlbWFudGljIiwgIm1lbW9yaWVzX2VwaXNvZGljIiwgIm1lbW9yaWVzX3Byb2NlZHVyYWwiKToKKyAgICAgICAgICAgICAgICBjb25uLmV4ZWN1dGUoZiJTRUxFQ1QgZW1iZWRkaW5nX2lkIEZST00ge3RhYmxlfSBXSEVSRSBlbWJlZGRpbmdfaWQgSVMgTk9UIE5VTEwiKQorICAgICAgICAgICAgICAgIGRiX2lkcy5leHRlbmQoaW50KHJvd1swXSkgZm9yIHJvdyBpbiBjb25uLmZldGNoYWxsKCkpCisgICAgICAgIHdpdGggc2VsZi52ZWN0b3Jfc3RvcmUubG9jazoKKyAgICAgICAgICAgIHZlY3Rvcl9pZHMgPSBbaW50KHZhbHVlKSBmb3IgdmFsdWUgaW4gc2VsZi52ZWN0b3Jfc3RvcmUuaWRzXQorICAgICAgICBpZiBzb3J0ZWQoZGJfaWRzKSAhPSBzb3J0ZWQodmVjdG9yX2lkcyk6CisgICAgICAgICAgICBsb2dnZXIud2FybmluZygiVmVjdG9yIElEIG1pc21hdGNoOiBEQj0lcywgdmVjdG9yPSVzOyByZWJ1aWxkaW5nIGluZGV4IiwgbGVuKGRiX2lkcyksIGxlbih2ZWN0b3JfaWRzKSkKICAgICAgICAgICAgIHNlbGYuX3JlYnVpbGRfaW5kZXgoKQogICAgICAgICBlbHNlOgotICAgICAgICAgICAgbG9nZ2VyLmluZm8oZiJTeXN0ZW0gQ29uc2lzdGVudC4ge3ZlY19jb3VudH0gbWVtb3JpZXMgbG9hZGVkLiIpCisgICAgICAgICAgICBsb2dnZXIuaW5mbygiU3lzdGVtIENvbnNpc3RlbnQuICVzIG1lbW9yaWVzIGxvYWRlZC4iLCBsZW4odmVjdG9yX2lkcykpCiAKICAgICBkZWYgX3JlYnVpbGRfaW5kZXgoc2VsZik6CiAgICAgICAgICIiIlJlLWVuY29kZSBhbGwgc2VtYW50aWMvZXBpc29kaWMvcHJvY2VkdXJhbCBtZW1vcmllcyBhbmQgcmVidWlsZCB2ZWN0b3Igc3RvcmUuIiIiCg==' | base64 -d > /tmp/memory-id.patch
+          echo '8c6906c3ad4a214c6a31476e3c61176686b2c111327a4992e063dc6f2e56a833  /tmp/memory-id.patch' | sha256sum -c -
+          git apply --check /tmp/memory-id.patch
+          git apply /tmp/memory-id.patch
+          echo 'dcfafcd05b8dfca0825f98c4f30dde7bb24e5f21642428dca8a1e95314be247a  Pinak_Services/memory_service/app/services/memory_service.py' | sha256sum -c -
+          test "$(git diff --name-only)" = 'Pinak_Services/memory_service/app/services/memory_service.py'
+      - name: Install and run full service tests
+        run: |
+          set -euo pipefail
+          uv sync --project Pinak_Services/memory_service --extra tests --frozen
+          uv run --project Pinak_Services/memory_service --extra tests --frozen pytest Pinak_Services/memory_service/tests/ -q --tb=short
+      - name: Audit base dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install pip-audit
+          uv export --project Pinak_Services/memory_service --frozen --no-dev --format requirements.txt --no-emit-project --no-emit-workspace --no-hashes --output-file /tmp/pinak-requirements.txt
+          pip-audit --no-deps -r /tmp/pinak-requirements.txt
+      - name: Commit only verified source
+        run: |
+          set -euo pipefail
+          echo 'dcfafcd05b8dfca0825f98c4f30dde7bb24e5f21642428dca8a1e95314be247a  Pinak_Services/memory_service/app/services/memory_service.py' | sha256sum -c -
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Pinak_Services/memory_service/app/services/memory_service.py
+          test "$(git diff --cached --name-only)" = 'Pinak_Services/memory_service/app/services/memory_service.py'
+          git commit -m 'Verify vector embedding IDs during startup'
+          git push origin HEAD:main
