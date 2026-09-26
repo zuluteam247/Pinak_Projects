@@ -6,6 +6,8 @@ import uuid
 import datetime
 import logging
 import re
+import hashlib
+from pathlib import Path
 from contextlib import contextmanager
 from typing import List, Dict, Any, Optional
 
@@ -403,7 +405,32 @@ class DatabaseManager:
                 conn.execute(f"""CREATE TRIGGER IF NOT EXISTS {table}_ad AFTER DELETE ON {table} BEGIN
                     INSERT INTO {fts}({fts}, rowid, {names}) VALUES ('delete', old.rowid, {old_cols});
                 END""")
+            self._run_migrations(conn)
 
+    def _run_migrations(self, conn: sqlite3.Connection) -> None:
+        """Apply ordered, append-only migrations; refuse changed or missing history."""
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations ("
+                     "version INTEGER PRIMARY KEY, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)")
+        root = Path(__file__).resolve().parent / "migrations"
+        files = sorted(root.glob("[0-9][0-9][0-9]_*.sql"))
+        versions = [int(path.name.split("_", 1)[0]) for path in files]
+        if versions != list(range(1, len(files) + 1)):
+            raise RuntimeError("Migration files must have contiguous numbered versions")
+        applied = {row[0]: row[1] for row in conn.execute(
+            "SELECT version, checksum FROM schema_migrations ORDER BY version")}
+        if set(applied) - set(versions):
+            raise RuntimeError("An applied schema migration file is missing")
+        for version, path in zip(versions, files):
+            statement = path.read_text(encoding="utf-8")
+            checksum = hashlib.sha256(statement.encode("utf-8")).hexdigest()
+            if version in applied:
+                if applied[version] != checksum:
+                    raise RuntimeError(f"Schema migration {version} checksum mismatch")
+                continue
+            # One SQL statement per file; DDL and version commit together.
+            conn.execute(statement)
+            conn.execute("INSERT INTO schema_migrations VALUES (?, ?, ?)",
+                         (version, checksum, datetime.datetime.now(datetime.timezone.utc).isoformat()))
 
     def _column_exists(self, conn: sqlite3.Connection, table: str, column: str) -> bool:
         try:

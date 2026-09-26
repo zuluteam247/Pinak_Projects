@@ -7,6 +7,10 @@ import asyncio
 import logging
 import sys
 import os
+import time
+import uuid
+import threading
+from collections import defaultdict
 
 # Configure logging
 logging.basicConfig(
@@ -15,6 +19,18 @@ logging.basicConfig(
     stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
+
+# Per-process counters, not cluster-wide Prometheus metrics. Do not label
+# tokens, queries, tenant names or raw paths (unbounded cardinality).
+_METRICS_LOCK = threading.Lock()
+_REQUEST_METRICS = defaultdict(lambda: [0, 0.0])
+
+
+def _metrics_snapshot():
+    with _METRICS_LOCK:
+        return {route: {"count": value[0], "duration_seconds_sum": round(value[1], 6)}
+                for route, value in _REQUEST_METRICS.items()}
+
 
 from app.api.v1 import endpoints
 from app.api.v1.endpoints import get_memory_service
@@ -135,6 +151,33 @@ class RequestSizeLimit:
 app.add_middleware(RequestSizeLimit)
 
 @app.middleware("http")
+async def request_observability(request: Request, call_next):
+    # Do not trust a caller-supplied request ID for log correlation.
+    request_id = uuid.uuid4().hex
+    request.state.request_id = request_id
+    start = time.monotonic()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        elapsed = time.monotonic() - start
+        route = request.scope.get("route")
+        route_name = getattr(route, "path", None) or "unmatched"
+        # Auth failures may occur before routing; do not put arbitrary URL
+        # segments in logs or metrics labels.
+        label = f"{request.method} {route_name} {status_code // 100}xx"
+        with _METRICS_LOCK:
+            _REQUEST_METRICS[label][0] += 1
+            _REQUEST_METRICS[label][1] += elapsed
+        logger.info(json.dumps({"event": "http_request", "request_id": request_id,
+                                "route": route_name, "method": request.method,
+                                "status": status_code, "duration_ms": round(elapsed * 1000, 2)}))
+
+
+@app.middleware("http")
 async def block_memory_until_verified(request: Request, call_next):
     if request.url.path.startswith("/api/v1/memory/") and getattr(request.app.state, "verification_status", "not_started") != "ready":
         status = getattr(request.app.state, "verification_status", "not_started")
@@ -154,6 +197,28 @@ def health_check(request: Request):
     return {"status": "ok", "embedding_backend": backend,
             "vector_enabled": service.vector_enabled,
             "embedding_model": service.config.get("embedding_model") if service.vector_enabled and backend != "dummy" else None}
+
+@app.get("/api/v1/metrics")
+def metrics(request: Request):
+    """Private operator telemetry; no public per-tenant usage feed."""
+    from fastapi.security import HTTPAuthorizationCredentials
+    from app.core.security import require_auth_context, require_scope, require_role
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    ctx = require_auth_context(HTTPAuthorizationCredentials(scheme="Bearer", credentials=header[7:]),
+                               request=request)
+    require_scope(ctx, "memory.admin")
+    require_role(ctx, "admin")
+    if getattr(request.app.state, "verification_status", "not_started") != "ready":
+        raise HTTPException(status_code=503, detail="Memory service not ready")
+    service = request.app.state.memory_service
+    with service.db.get_cursor() as cursor:
+        access_count = cursor.execute("SELECT count(*) FROM logs_access").fetchone()[0]
+    return {"verification": request.app.state.verification_status,
+            "vectors": service.vector_store.total if service.vector_store else 0,
+            "access_rows": access_count, "requests": _metrics_snapshot()}
+
 
 @app.get("/api/v1/live")
 def liveness_check():

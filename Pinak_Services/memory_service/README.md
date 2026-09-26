@@ -101,10 +101,13 @@ Startup verification compares the multiset of database embedding IDs with the ID
 
 The audit verifier checks the hash chain for retained rows. An attacker with write access to SQLite can delete the latest audit rows and leave a valid-looking shorter chain; local verification cannot detect that silent tail deletion. Stronger tamper evidence needs a separately controlled, append-only destination for the head digest, a defined anchoring cadence and custodian, and a restore-time comparison against that external anchor. No external anchor is configured here, and a head stored beside the mutable database would not close this gap.
 
-## 💾 Daily Backups (Google Drive)
-- Backup script: `scripts/pinak-memory-backup.sh`
-- LaunchAgent: `com.pinak.memory.backup.plist`
-- Requires **rclone** with a `gdrive:` remote.
+## Backups and migrations
+
+`python scripts/backup_verified.py create --data-dir data --backup-root ../pinak-memory-backups` makes an SQLite online-backup copy, copies the NumPy index when one exists, checks DB/index ID parity (or confirms zero embedding IDs for keyword-only data), and writes SHA-256 file hashes to a manifest. `python scripts/backup_verified.py verify --backup-dir <backup-directory>` independently checks the files. A quiescent writer is safest: concurrent writes can yield different DB/index instants, in which case backup fails without publishing an incomplete directory. To restore, stop the service, verify a backup, restore both files together (including active JWT revocations in SQLite), then let startup verification run; restore has not been automated or exercised against a production dataset. The shell wrapper accepts `PINAK_DATA_ROOT`, `PINAK_BACKUP_ROOT`, and `PINAK_BACKUP_PYTHON`, but no job, rclone remote, Mac LaunchAgent, or cloud backup was installed or run by this patch. The checked-in LaunchAgent is a template only; scheduling and offsite custody need an operator decision.
+
+Numbered append-only SQL migrations in `app/core/migrations/` run at DB initialization after compatibility setup. The schema ledger stores checksums and refuses modified or missing applied migrations. Add one SQL statement per numbered file and verify on a disposable copy before operating on a live dataset. Existing ad-hoc compatibility columns still run; the runner is a foundation, not a completed migration of every historical schema change.
+
+`/api/v1/metrics` is an admin-token-only JSON endpoint with per-process request counts and latency sums by route/status class, current vector count, readiness and global access-log size. Request IDs are server-generated, exposed as `X-Request-ID`, and logged with route, status and duration, without query strings or tokens. This is not a cluster-wide Prometheus exporter. The endpoint is not mounted publicly without admin JWT; do not scrape it with an unauthenticated collector. Access-event rows are not yet stamped with request IDs, so direct log-to-row correlation needs a future schema change.
 
 ---
 
