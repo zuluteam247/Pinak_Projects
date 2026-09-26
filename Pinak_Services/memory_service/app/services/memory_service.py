@@ -4,7 +4,9 @@ import os
 import hashlib
 import datetime
 import logging
-import time
+import threading
+from collections import Counter
+from uuid import uuid4
 import concurrent.futures
 from typing import Dict, List, Optional, Any, Union
 
@@ -52,6 +54,7 @@ class MemoryService:
         # Components
         self.db = DatabaseManager(self.db_path)
         self.schema_registry = SchemaRegistry()
+        self._embedding_write_lock = threading.RLock()
 
         # Model
         self.embedding_backend = (os.getenv("PINAK_EMBEDDING_BACKEND") or "").lower()
@@ -191,95 +194,64 @@ class MemoryService:
         except Exception:
             pass
 
+    def _new_embedding_id(self) -> int:
+        """Generate a positive SQLite/NumPy int64 id, avoiding existing rows."""
+        for _ in range(20):
+            value = uuid4().int & ((1 << 63) - 1)
+            if (value and not self.db.embedding_id_exists(value)
+                    and (not self.vector_store or value not in self.vector_store.ids)):
+                return value
+        raise RuntimeError("Could not allocate unique embedding id")
+
     def verify_and_recover(self):
-        """
-        Check consistency between DB and Vector Store. Rebuild if necessary.
-        """
+        """Repair missing/extra vectors without re-encoding unaffected rows."""
         if not self.vector_enabled:
             logger.info("Vector store disabled (backend=%s); skipping verify/recover", self.embedding_backend)
             return
-        # Compare the full ID multiset, not just row counts. Equal-sized but
-        # mismatched snapshots silently return the wrong memory on retrieval.
-        db_ids = []
-        with self.db.get_cursor() as conn:
-            for table in ("memories_semantic", "memories_episodic", "memories_procedural"):
-                conn.execute(f"SELECT embedding_id FROM {table} WHERE embedding_id IS NOT NULL")
-                db_ids.extend(int(row[0]) for row in conn.fetchall())
-        with self.vector_store.lock:
-            vector_ids = [int(value) for value in self.vector_store.ids]
-        if sorted(db_ids) != sorted(vector_ids):
-            logger.warning("Vector ID mismatch: DB=%s, vector=%s; rebuilding index", len(db_ids), len(vector_ids))
-            self._rebuild_index()
-        else:
-            logger.info("System Consistent. %s memories loaded.", len(vector_ids))
+        # Hold the in-process vector lock throughout reconciliation. Batch saves
+        # one complete snapshot only after removing extras and adding missing ids.
+        with self._embedding_write_lock, self.vector_store.lock:
+            rows = {}
+            with self.db.get_cursor() as conn:
+                queries = (
+                    ("memories_semantic", "content"),
+                    ("memories_episodic", "content, goal, outcome"),
+                    ("memories_procedural", "skill_name, trigger, description"),
+                )
+                for table, cols in queries:
+                    for row in conn.execute(f"SELECT embedding_id, {cols} FROM {table} WHERE embedding_id IS NOT NULL"):
+                        emb_id = int(row["embedding_id"])
+                        if emb_id in rows:
+                            raise RuntimeError(f"Duplicate DB embedding id {emb_id}; manual repair required")
+                        if table == "memories_semantic":
+                            text = row["content"]
+                        elif table == "memories_episodic":
+                            text = f"{row['content']} {row['goal'] or ''} {row['outcome'] or ''}"
+                        else:
+                            text = f"{row['skill_name']} {row['trigger'] or ''} {row['description'] or ''}"
+                        rows[emb_id] = text
+            counts = Counter(int(value) for value in self.vector_store.ids)
+            # Duplicate vector IDs cannot be trusted; remove every copy and
+            # re-encode that id from its one DB row.
+            extra = {value for value, count in counts.items() if value not in rows or count > 1}
+            missing = (set(rows) - set(counts)) | (extra & set(rows))
+            if extra:
+                self.vector_store.remove_ids(list(extra))
+            if missing:
+                ids = sorted(missing)
+                for offset in range(0, len(ids), 100):
+                    page = ids[offset:offset + 100]
+                    vectors = np.asarray(self.model.encode([rows[value] for value in page]), dtype=np.float32)
+                    self.vector_store.add_vectors(vectors, page)
+            if extra or missing:
+                self.vector_store.save()
+                logger.warning("Incremental vector repair: removed=%s re-encoded=%s", len(extra), len(missing))
+            else:
+                logger.info("System Consistent. %s memories loaded.", len(counts))
 
     def _rebuild_index(self):
-        """Re-encode all semantic/episodic/procedural memories and rebuild vector store."""
-        if not self.vector_enabled:
-            logger.info("Vector store disabled (backend=%s); rebuild skipped", self.embedding_backend)
-            return
-        with self.vector_store.batch_add():
-            with self.vector_store.lock:
-                self.vector_store.vectors = np.empty((0, self.embedding_dim), dtype=np.float32)
-                self.vector_store.ids = np.array([], dtype=np.int64)
-
-            def _page_rows(query: str, params: tuple):
-                with self.db.get_cursor() as conn:
-                    conn.execute(query, params)
-                    return conn.fetchall()
-
-            def _ingest_rows(rows, build_text):
-                texts = []
-                ids = []
-                for row in rows:
-                    embedding_id = row["embedding_id"]
-                    if embedding_id is None:
-                        continue
-                    texts.append(build_text(row))
-                    ids.append(embedding_id)
-                if texts:
-                    embeddings = self.model.encode(texts)
-                    self.vector_store.add_vectors(embeddings, ids)
-
-            # Semantic
-            offset = 0
-            limit = 100
-            while True:
-                rows = _page_rows(
-                    "SELECT content, embedding_id FROM memories_semantic LIMIT ? OFFSET ?",
-                    (limit, offset),
-                )
-                if not rows:
-                    break
-                _ingest_rows(rows, lambda r: r["content"])
-                offset += len(rows)
-                logger.info("Rebuilt %s semantic vectors...", offset)
-
-            # Episodic
-            offset = 0
-            while True:
-                rows = _page_rows(
-                    "SELECT content, goal, outcome, embedding_id FROM memories_episodic LIMIT ? OFFSET ?",
-                    (limit, offset),
-                )
-                if not rows:
-                    break
-                _ingest_rows(rows, lambda r: f"{r['content']} {r['goal'] or ''} {r['outcome'] or ''}")
-                offset += len(rows)
-                logger.info("Rebuilt %s episodic vectors...", offset)
-
-            # Procedural
-            offset = 0
-            while True:
-                rows = _page_rows(
-                    "SELECT skill_name, trigger, description, embedding_id FROM memories_procedural LIMIT ? OFFSET ?",
-                    (limit, offset),
-                )
-                if not rows:
-                    break
-                _ingest_rows(rows, lambda r: f"{r['skill_name']} {r['trigger'] or ''} {r['description'] or ''}")
-                offset += len(rows)
-                logger.info("Rebuilt %s procedural vectors...", offset)
+        """Compatibility entry point: reconcile, never discard unaffected vectors."""
+        self.verify_and_recover()
 
     def _load_config(self, path):
         if not os.path.exists(path):
@@ -338,33 +310,19 @@ class MemoryService:
                 client_meta["child_client_id"],
             )
 
-            embedding_id = None
-            if self.vector_enabled:
-                # 1. Generate Embedding
-                embedding = self.model.encode([content])[0].astype("float32")
-
-                # 2. Generate ID for Vector Store
-                # We use a hash or a simpler counter to avoid huge int issues
-                embedding_id = hash(content + str(time.time())) % (2**31 - 1)
-
-                # 3. Add to Vector Store
-                self.vector_store.add_vectors(np.array([embedding]), [embedding_id])
-
-            # 4. Add to DB
-            result = self.db.add_semantic(
-                content,
-                tags,
-                tenant,
-                project_id,
-                embedding_id,
-                agent_id=agent_id,
-                client_id=client_meta["client_id"],
-                client_name=client_meta["client_name"],
-            )
-
-            # 5. Save Vector Store (persist)
-            if self.vector_enabled:
-                self.vector_store.save()
+            # Persist the row first. A vector failure leaves a visible row with
+            # an embedding id; startup reconciliation fills only that vector.
+            with self._embedding_write_lock:
+                embedding_id = self._new_embedding_id() if self.vector_enabled else None
+                result = self.db.add_semantic(
+                    content, tags, tenant, project_id, embedding_id,
+                    agent_id=agent_id, client_id=client_meta["client_id"],
+                    client_name=client_meta["client_name"],
+                )
+                if self.vector_enabled:
+                    embedding = self.model.encode([content])[0].astype("float32")
+                    self.vector_store.add_vectors(np.array([embedding]), [embedding_id])
+                    self.vector_store.save()
 
             self.db.add_access_event(
                 event_type="write",
@@ -460,31 +418,20 @@ class MemoryService:
                 client_meta["parent_client_id"],
                 client_meta["child_client_id"],
             )
-            embedding_id = None
-            if self.vector_enabled:
-                # 1. Generate Embedding from content + goal + outcome
-                search_blob = f"{content} {goal or ''} {outcome or ''}"
-                embedding = self.model.encode([search_blob])[0].astype("float32")
-                embedding_id = hash(search_blob + str(time.time())) % (2**31 - 1)
+            with self._embedding_write_lock:
+                embedding_id = self._new_embedding_id() if self.vector_enabled else None
+                result = self.db.add_episodic(
+                    content, tenant, project_id, salience, goal, plan, tool_logs,
+                    outcome, embedding_id, agent_id=agent_id,
+                    client_id=client_meta["client_id"],
+                    client_name=client_meta["client_name"],
+                )
+                if self.vector_enabled:
+                    search_blob = f"{content} {goal or ''} {outcome or ''}"
+                    embedding = self.model.encode([search_blob])[0].astype("float32")
+                    self.vector_store.add_vectors(np.array([embedding]), [embedding_id])
+                    self.vector_store.save()
 
-                # 2. Add to Vector Store
-                self.vector_store.add_vectors(np.array([embedding]), [embedding_id])
-
-            # 3. Add to DB
-            result = self.db.add_episodic(
-                content,
-                tenant,
-                project_id,
-                salience,
-                goal,
-                plan,
-                tool_logs,
-                outcome,
-                embedding_id,
-                agent_id=agent_id,
-                client_id=client_meta["client_id"],
-                client_name=client_meta["client_name"],
-            )
             self.db.add_access_event(
                 event_type="write",
                 status="ok",
@@ -576,30 +523,20 @@ class MemoryService:
                 client_meta["parent_client_id"],
                 client_meta["child_client_id"],
             )
-            embedding_id = None
-            if self.vector_enabled:
-                # 1. Generate Embedding from skill_name + trigger + description
-                search_blob = f"{skill_name} {trigger or ''} {description or ''}"
-                embedding = self.model.encode([search_blob])[0].astype("float32")
-                embedding_id = hash(search_blob + str(time.time())) % (2**31 - 1)
+            with self._embedding_write_lock:
+                embedding_id = self._new_embedding_id() if self.vector_enabled else None
+                result = self.db.add_procedural(
+                    skill_name, steps, tenant, project_id, description, trigger,
+                    code_snippet, embedding_id, agent_id=agent_id,
+                    client_id=client_meta["client_id"],
+                    client_name=client_meta["client_name"],
+                )
+                if self.vector_enabled:
+                    search_blob = f"{skill_name} {trigger or ''} {description or ''}"
+                    embedding = self.model.encode([search_blob])[0].astype("float32")
+                    self.vector_store.add_vectors(np.array([embedding]), [embedding_id])
+                    self.vector_store.save()
 
-                # 2. Add to Vector Store
-                self.vector_store.add_vectors(np.array([embedding]), [embedding_id])
-
-            # 3. Add to DB
-            result = self.db.add_procedural(
-                skill_name,
-                steps,
-                tenant,
-                project_id,
-                description,
-                trigger,
-                code_snippet,
-                embedding_id,
-                agent_id=agent_id,
-                client_id=client_meta["client_id"],
-                client_name=client_meta["client_name"],
-            )
             self.db.add_access_event(
                 event_type="write",
                 status="ok",

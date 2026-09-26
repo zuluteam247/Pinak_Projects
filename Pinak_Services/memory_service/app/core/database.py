@@ -419,8 +419,10 @@ class DatabaseManager:
 
     @contextmanager
     def get_cursor(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA journal_mode=WAL")
         cur = conn.cursor()
         try:
             yield cur
@@ -430,6 +432,14 @@ class DatabaseManager:
             raise
         finally:
             conn.close()
+
+    def embedding_id_exists(self, embedding_id: int) -> bool:
+        """Check all indexed layers before reserving a new 63-bit vector id."""
+        with self.get_cursor() as conn:
+            for table in ("memories_semantic", "memories_episodic", "memories_procedural"):
+                if conn.execute(f"SELECT 1 FROM {table} WHERE embedding_id=? LIMIT 1", (embedding_id,)).fetchone():
+                    return True
+        return False
 
     def _sanitize_fts_query(self, query: str) -> str:
         terms = []
@@ -445,7 +455,7 @@ class DatabaseManager:
 
     # --- CRUD Operations ---
 
-    def add_semantic(self, content: str, tags: list, tenant: str, project_id: str, embedding_id: int,
+    def add_semantic(self, content: str, tags: list, tenant: str, project_id: str, embedding_id: Optional[int],
                      agent_id: Optional[str] = None, client_id: Optional[str] = None,
                      client_name: Optional[str] = None) -> Dict[str, Any]:
         mid = str(uuid.uuid4())

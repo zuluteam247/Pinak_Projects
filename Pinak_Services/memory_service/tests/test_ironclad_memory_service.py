@@ -44,7 +44,7 @@ def test_load_embedding_model_exception(monkeypatch):
         with pytest.raises(RuntimeError, match="load fail"):
             svc._load_embedding_model("some-model")
 
-def test_verify_and_recover_triggers_rebuild(tmp_path):
+def test_verify_and_recover_repairs_missing_id(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     config = {"data_root": str(data_dir)}
@@ -55,9 +55,10 @@ def test_verify_and_recover_triggers_rebuild(tmp_path):
         svc.db.add_semantic("test content", [], "tenant1", "proj1", 123)
         
         # Vector store is empty. db_count (1) != vec_count (0)
-        with patch.object(svc, "_rebuild_index") as mock_rebuild:
+        with patch.object(svc.model, "encode", wraps=svc.model.encode) as encode:
             svc.verify_and_recover()
-            mock_rebuild.assert_called_once()
+            encode.assert_called_once()
+            assert svc.vector_store.ids.tolist() == [123]
 
 def test_verify_and_recover_rebuilds_equal_count_wrong_ids(tmp_path, monkeypatch):
     monkeypatch.setenv("PINAK_EMBEDDING_BACKEND", "dummy")
