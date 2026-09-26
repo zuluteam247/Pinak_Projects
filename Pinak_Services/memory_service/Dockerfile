@@ -26,5 +26,8 @@ WORKDIR /code/Pinak_Services/memory_service
 EXPOSE 8000
 
 # Run the FastAPI application via uv to ensure the managed environment is used
-ENV PINAK_EMBEDDING_BACKEND=dummy
-CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# This image has no optional embeddings extra. Keyword-only retrieval is honest;
+# a separate image must install the extra before enabling real vectors.
+ENV PINAK_EMBEDDING_BACKEND=none
+ENV PINAK_DATA_ROOT=/code/Pinak_Services/memory_service/data
+CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -1,6 +1,8 @@
 
 from fastapi import FastAPI, HTTPException, Request
 from contextlib import asynccontextmanager
+import fcntl
+import json
 import asyncio
 import logging
 import sys
@@ -30,36 +32,62 @@ async def _verify_in_background(app: FastAPI, service):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    service = get_memory_service()
-    app.state.verification_status = "verifying"
-    skip_verify = os.getenv("PINAK_SKIP_VERIFY_ON_STARTUP", "false").lower() in ("1", "true", "yes")
-    background_verify = os.getenv("PINAK_VERIFY_IN_BACKGROUND", "false").lower() in ("1", "true", "yes")
-    verification_task = None
-    if skip_verify:
-        # Explicit bypass leaves readiness off: no verification means no proof of readiness.
-        app.state.verification_status = "skipped"
-    elif background_verify:
-        verification_task = asyncio.create_task(_verify_in_background(app, service))
+    # Lock before MemoryService initializes or repairs the DB/vector index.
+    # flock protects processes on one local filesystem only. Shared network
+    # volumes and separately replicated copies of one dataset are unsupported.
+    config_path = os.getenv("PINAK_CONFIG_PATH", "app/core/config.json")
+    if os.path.exists(config_path):
+        with open(config_path) as handle:
+            config = json.load(handle)
     else:
-        service.verify_and_recover()
-        app.state.verification_status = "ready"
-
-    cleanup_task = asyncio.create_task(cleanup_expired_memories(service.db, interval_seconds=3600))
+        config = {}
+    data_root = os.getenv("PINAK_DATA_ROOT") or config.get("data_root", "data")
+    os.makedirs(data_root, exist_ok=True)
+    lock_path = os.path.join(data_root, ".pinak-writer.lock")
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        yield
-    finally:
-        app.state.verification_status = "stopping"
-        cleanup_task.cancel()
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        os.close(lock_fd)
+        raise RuntimeError(f"Memory data directory already has a writer: {data_root}") from exc
+    try:
+        service = get_memory_service()
+        # Tests may override service construction. In normal operation this
+        # resolves from the same config path, so the held lock covers its data.
+        if os.path.realpath(service.data_root) != os.path.realpath(data_root):
+            raise RuntimeError("Memory service data directory differs from writer lock directory")
+        app.state.memory_service = service
+        app.state.verification_status = "verifying"
+        skip_verify = os.getenv("PINAK_SKIP_VERIFY_ON_STARTUP", "false").lower() in ("1", "true", "yes")
+        background_verify = os.getenv("PINAK_VERIFY_IN_BACKGROUND", "false").lower() in ("1", "true", "yes")
+        verification_task = None
+        if skip_verify:
+            # No verification means no proof of readiness.
+            app.state.verification_status = "skipped"
+        elif background_verify:
+            verification_task = asyncio.create_task(_verify_in_background(app, service))
+        else:
+            service.verify_and_recover()
+            app.state.verification_status = "ready"
+
+        cleanup_task = asyncio.create_task(cleanup_expired_memories(service.db, interval_seconds=3600))
         try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            pass
-        # asyncio.to_thread cannot safely interrupt an in-progress rebuild.
-        # Wait before saving the vector snapshot or closing the service.
-        if verification_task is not None:
-            await verification_task
-        if getattr(service, "vector_store", None):
-            service.vector_store.save()
+            yield
+        finally:
+            app.state.verification_status = "stopping"
+            cleanup_task.cancel()
+            try:
+                await cleanup_task
+            except asyncio.CancelledError:
+                pass
+            if verification_task is not None:
+                await verification_task
+            if getattr(service, "vector_store", None):
+                service.vector_store.save()
+    finally:
+        app.state.memory_service = None
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
 
 app = FastAPI(title="Pinak Memory Service", lifespan=lifespan)
 
@@ -121,7 +149,11 @@ def health_check(request: Request):
     status = getattr(request.app.state, "verification_status", "not_started")
     if status != "ready":
         raise HTTPException(status_code=503, detail={"status": "not_ready", "verification": status})
-    return {"status": "ok"}
+    service = request.app.state.memory_service
+    backend = service.embedding_backend or "configured_model"
+    return {"status": "ok", "embedding_backend": backend,
+            "vector_enabled": service.vector_enabled,
+            "embedding_model": service.config.get("embedding_model") if service.vector_enabled and backend != "dummy" else None}
 
 @app.get("/api/v1/live")
 def liveness_check():

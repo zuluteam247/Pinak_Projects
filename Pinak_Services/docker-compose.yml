@@ -1,24 +1,21 @@
-
-version: '3.8'
-
 services:
   memory-api:
-    build: ./memory_service
+    build:
+      context: ..
+      dockerfile: Pinak_Services/memory_service/Dockerfile
+    # One process owns each local data directory. Do not scale this service against
+    # the same volume; network filesystems are unsupported for SQLite and flock.
+    restart: unless-stopped
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
-      # Mount the app directory for hot-reloading during development
-      - ./memory_service/app:/code/app
-      # Mount the data directory to persist the vector index
-      - ./memory_service/data:/code/data
+      - ./memory_service/data:/code/Pinak_Services/memory_service/data
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    depends_on:
-      - redis
-
-  redis:
-    image: "redis:alpine"
-    ports:
-      - "6379:6379"
-
+      PINAK_JWT_SECRET: ${PINAK_JWT_SECRET:?Set a non-default PINAK_JWT_SECRET in your environment}
+      PINAK_EMBEDDING_BACKEND: none
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

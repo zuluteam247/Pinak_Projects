@@ -44,7 +44,7 @@ class MemoryService:
         self.config = self._load_config(config_path)
 
         # Paths
-        self.data_root = self.config.get("data_root", "data")
+        self.data_root = os.getenv("PINAK_DATA_ROOT") or self.config.get("data_root", "data")
         os.makedirs(self.data_root, exist_ok=True)
         self.db_path = os.path.join(self.data_root, "memory.db")
         self.vector_path = os.path.join(self.data_root, "vectors.index.npy")
