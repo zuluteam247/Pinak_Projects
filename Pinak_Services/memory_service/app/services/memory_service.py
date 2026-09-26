@@ -18,6 +18,10 @@ from app.core.schema_registry import SchemaRegistry
 from app.services.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
+# Bounded shared pool avoids allocating a thread pool on every timeout query.
+# Timed-out work may continue; the fixed pool caps concurrent model encodes.
+_VECTOR_SEARCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="pinak-vector-search")
+_VECTOR_SEARCH_SLOTS = threading.BoundedSemaphore(8)
 
 class _DeterministicEncoder:
     """Lightweight embedding encoder used for tests and local development."""
@@ -729,12 +733,17 @@ class MemoryService:
         Performs Hybrid Search (Vector + Keyword) with Weighted Fusion.
         semantic_weight: 0.0 = pure keyword, 1.0 = pure semantic.
         """
+        # Bound internal callers as well as HTTP inputs, before any DB or
+        # vector allocation. Direct callers cannot bypass the API guard.
+        limit = max(1, min(int(limit), 100))
         # 1. Keyword Search (SQLite FTS)
         keyword_results = self.db.search_keyword(query, tenant, project_id, limit=limit * 2)
 
         # RAG is deliberately keyword-only until a separately indexed vector path exists.
         rag_results = self.db.search_rag(query, tenant, project_id, limit=limit * 2)
         keyword_results.extend(rag_results)
+        # Working notes are short-lived keyword hits, not vector-embedded.
+        keyword_results.extend(self.db.search_working(query, tenant, project_id, limit=limit * 2))
 
         # 2. Vector Search (Semantic)
         distances, ids = self._safe_vector_search(query, limit, tenant, project_id)
@@ -751,6 +760,11 @@ class MemoryService:
         # Unified result retrieval (Semantic, Episodic, Procedural)
         vector_results_db = self.db.get_memories_by_embedding_ids(valid_ids, tenant, project_id)
         vector_map = {item['embedding_id']: item for item in vector_results_db}
+
+        # Build lookup tables once rather than scanning both result lists for
+        # every merged ID. First keyword hit wins when duplicates occur.
+        keyword_by_id = {item['id']: item for item in reversed(keyword_results)}
+        vector_by_id = {item['id']: item for item in vector_results_db}
 
         # 4. Score Normalization & Weighted Fusion
         fts_scores = {}
@@ -780,29 +794,13 @@ class MemoryService:
 
         # 4. Weighted Fusion
         merged: Dict[str, Dict] = {}
-        all_ids = set(fts_scores.keys()) | set(vector_scores.keys())
         final_scores = {}
-
-        for mid in all_ids:
-            # Get item data from either source
-            item = None
-            if mid in fts_scores:
-                # Find in keyword_results
-                item = next((x for x in keyword_results if x['id'] == mid), None)
-
-            if not item and mid in vector_scores:
-                # Find in vector results
-                item = next((x for x in vector_results_db if x['id'] == mid), None)
-
+        for mid in fts_scores.keys() | vector_scores.keys():
+            item = keyword_by_id.get(mid) or vector_by_id.get(mid)
             if item:
-                if mid not in merged:
-                    merged[mid] = item
-
-                s_vec = vector_scores.get(mid, 0.0)
-                s_fts = fts_scores.get(mid, 0.0)
-
-                score = (semantic_weight * s_vec) + ((1.0 - semantic_weight) * s_fts)
-                final_scores[mid] = score
+                merged[mid] = item
+                final_scores[mid] = (semantic_weight * vector_scores.get(mid, 0.0)
+                                     + (1.0 - semantic_weight) * fts_scores.get(mid, 0.0))
 
         # Sort by Score DESC
         sorted_ids = sorted(final_scores.keys(), key=lambda x: final_scores[x], reverse=True)
@@ -820,6 +818,7 @@ class MemoryService:
             return [], []
         if os.getenv("PINAK_VECTOR_SEARCH_DISABLED", "false").lower() in ("1", "true", "yes"):
             return [], []
+        limit = max(1, min(int(limit), 100))
         timeout_ms = int(os.getenv("PINAK_EMBEDDING_TIMEOUT_MS", "0") or "0")
 
         def _compute():
@@ -836,16 +835,25 @@ class MemoryService:
                 logger.warning("Vector search failed: %s", exc)
                 return [], []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_compute)
-            try:
-                return future.result(timeout=timeout_ms / 1000.0)
-            except concurrent.futures.TimeoutError:
-                logger.warning("Vector search timed out after %sms; falling back to keyword search", timeout_ms)
-                return [], []
-            except Exception as exc:
-                logger.warning("Vector search failed: %s", exc)
-                return [], []
+        if not _VECTOR_SEARCH_SLOTS.acquire(blocking=False):
+            logger.warning("Vector search pool saturated; falling back to keyword search")
+            return [], []
+        try:
+            future = _VECTOR_SEARCH_EXECUTOR.submit(_compute)
+        except Exception as exc:
+            _VECTOR_SEARCH_SLOTS.release()
+            logger.warning("Vector search submission failed: %s", exc)
+            return [], []
+        future.add_done_callback(lambda completed: _VECTOR_SEARCH_SLOTS.release())
+        try:
+            return future.result(timeout=timeout_ms / 1000.0)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            logger.warning("Vector search timed out after %sms; falling back to keyword search", timeout_ms)
+            return [], []
+        except Exception as exc:
+            logger.warning("Vector search failed: %s", exc)
+            return [], []
 
     def intent_sniff(self, content: str, tenant: str, project_id: str) -> List[Dict[str, Any]]:
         """

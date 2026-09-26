@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, status, HTTPException
+from fastapi import APIRouter, Body, Depends, Query, status, HTTPException
 
 from app.core.schemas import (
     MemoryCreate, MemoryRead, MemorySearchResult,
@@ -79,7 +79,7 @@ def add_memory(
 @router.get("/search", response_model=List[MemorySearchResult])
 def search_memory(
     query: str,
-    k: int = 5,
+    k: int = Query(default=5, ge=1, le=100),
     ctx: AuthContext = Depends(require_auth_context),
     service: MemoryService = Depends(get_memory_service),
 ):
@@ -102,7 +102,7 @@ def search_memory(
 @router.get("/rag/search")
 def search_rag(
     query: str,
-    limit: int = 10,
+    limit: int = Query(default=10, ge=1, le=100),
     ctx: AuthContext = Depends(require_auth_context),
     service: MemoryService = Depends(get_memory_service),
 ):
@@ -194,7 +194,7 @@ def add_event(
 
 @router.get("/events")
 def list_events(
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=200),
     ctx: AuthContext = Depends(require_auth_context),
     service: MemoryService = Depends(get_memory_service),
 ):
@@ -224,7 +224,7 @@ def add_session(
 @router.get("/session/list")
 def list_session(
     session_id: str,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=200),
     ctx: AuthContext = Depends(require_auth_context),
     service: MemoryService = Depends(get_memory_service),
 ):
@@ -297,7 +297,7 @@ def register_client(
 
 @router.get("/client/list", response_model=List[ClientRegisterRead])
 def list_clients(
-    limit: int = 200,
+    limit: int = Query(default=200, ge=1, le=200),
     ctx: AuthContext = Depends(require_auth_context),
     service: MemoryService = Depends(get_memory_service),
 ):
@@ -318,7 +318,7 @@ def client_summary(
 
 @router.get("/agent/list", response_model=List[AgentRead])
 def list_agents(
-    limit: int = 200,
+    limit: int = Query(default=200, ge=1, le=200),
     ctx: AuthContext = Depends(require_auth_context),
     service: MemoryService = Depends(get_memory_service),
 ):
@@ -327,7 +327,7 @@ def list_agents(
 
 @router.get("/access/list", response_model=List[AccessEventRead])
 def list_access_events(
-    limit: int = 200,
+    limit: int = Query(default=200, ge=1, le=200),
     ctx: AuthContext = Depends(require_auth_context),
     service: MemoryService = Depends(get_memory_service),
 ):
@@ -357,7 +357,7 @@ def add_client_issue(
 @router.get("/client/issues", response_model=List[ClientIssueRead])
 def list_client_issues(
     status_filter: str = "open",
-    limit: int = 200,
+    limit: int = Query(default=200, ge=1, le=200),
     ctx: AuthContext = Depends(require_auth_context),
     service: MemoryService = Depends(get_memory_service),
 ):
@@ -402,7 +402,7 @@ def propose_quarantine(
 @router.get("/quarantine/list", response_model=List[QuarantineItemRead])
 def list_quarantine(
     status_filter: str = "pending",
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=200),
     ctx: AuthContext = Depends(require_auth_context),
     service: MemoryService = Depends(get_memory_service),
 ):
@@ -443,7 +443,7 @@ def reject_quarantine(
 
 @router.get("/working/list")
 def list_working(
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=200),
     ctx: AuthContext = Depends(require_auth_context),
     service: MemoryService = Depends(get_memory_service),
 ):

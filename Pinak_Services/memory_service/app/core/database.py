@@ -1091,6 +1091,33 @@ class DatabaseManager:
             )
             return cur.rowcount > 0
 
+    def search_working(self, query: str, tenant: str, project_id: str,
+                       limit: int = 10) -> List[Dict[str, Any]]:
+        """Scoped literal lookup of non-expired working notes, including legacy DBs."""
+        words = [word for word in query.split() if word][:8]
+        if not words:
+            return []
+        clauses = []
+        params = []
+        for word in words:
+            pattern = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            clauses.append("{field} LIKE ? ESCAPE '\\'")
+            params.append(pattern)
+        now = datetime.datetime.now().isoformat()
+        with self.get_cursor() as conn:
+            # A pre-migration DB has content/ts instead of value/updated_at.
+            # Select the extant columns without changing live rows or schema.
+            field = "value" if self._column_exists(conn, "working_memory", "value") else "content"
+            stamp = "updated_at" if self._column_exists(conn, "working_memory", "value") else "ts"
+            where = " OR ".join(clause.format(field=field) for clause in clauses)
+            sql = (f"SELECT id, {field} AS content, {stamp} AS created_at, "
+                   "tenant, project_id, 'working' AS type FROM working_memory "
+                   "WHERE tenant=? AND project_id=? "
+                   "AND (expires_at IS NULL OR expires_at > ?) AND (" + where + ") "
+                   f"ORDER BY {stamp} DESC LIMIT ?")
+            return [dict(row) for row in conn.execute(sql,
+                (tenant, project_id, now, *params, max(1, min(limit, 100))))]
+
     def list_working(self, tenant: str, project_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         with self.get_cursor() as conn:
             cur = conn.execute("""
