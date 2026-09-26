@@ -1,3 +1,5 @@
+import datetime
+import uuid
 import jwt
 import os
 import pytest
@@ -16,7 +18,7 @@ def auth_token():
         "scopes": ["memory.read", "memory.write"],
         "client_name": "test-client",
     }
-    return jwt.encode(payload, secret, algorithm="HS256")
+    return jwt.encode({**payload, "iss": "pinak-memory", "aud": "pinak-memory-api", "jti": str(uuid.uuid4()), "exp": payload.get("exp", datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5))}, secret, algorithm="HS256")
 
 
 @pytest.fixture
@@ -30,7 +32,7 @@ def admin_token():
         "scopes": ["memory.read", "memory.write", "memory.admin"],
         "client_name": "admin-client",
     }
-    return jwt.encode(payload, secret, algorithm="HS256")
+    return jwt.encode({**payload, "iss": "pinak-memory", "aud": "pinak-memory-api", "jti": str(uuid.uuid4()), "exp": payload.get("exp", datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5))}, secret, algorithm="HS256")
 
 
 @pytest.fixture

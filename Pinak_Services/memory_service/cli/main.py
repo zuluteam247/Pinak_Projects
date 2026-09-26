@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 
 import datetime
+import uuid
 import jwt
 import httpx
 from app.core.database import DatabaseManager
@@ -155,8 +156,11 @@ def mint(tenant: str, project: str = "default", secret: str = None):
         "tenant": tenant,
         "project_id": project,
         "scopes": ["memory.read", "memory.write"],
-        "iat": datetime.datetime.utcnow(),
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(days=30),
+        "iat": datetime.datetime.now(datetime.timezone.utc),
+        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1),
+        "iss": os.getenv("PINAK_JWT_ISSUER", "pinak-memory"),
+        "aud": os.getenv("PINAK_JWT_AUDIENCE", "pinak-memory-api"),
+        "jti": str(uuid.uuid4()),
     }
     token = jwt.encode(payload, jwt_secret, algorithm="HS256")
     typer.echo(token)
@@ -172,8 +176,11 @@ def search(query: str, tenant: str = "demo", project: str = "default", url: str 
         "tenant": tenant,
         "project_id": project,
         "scopes": ["memory.read"],
-        "iat": datetime.datetime.utcnow(),
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=5),
+        "iat": datetime.datetime.now(datetime.timezone.utc),
+        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5),
+        "iss": os.getenv("PINAK_JWT_ISSUER", "pinak-memory"),
+        "aud": os.getenv("PINAK_JWT_AUDIENCE", "pinak-memory-api"),
+        "jti": str(uuid.uuid4()),
     }
     token = jwt.encode(token_payload, token_secret, algorithm="HS256")
     

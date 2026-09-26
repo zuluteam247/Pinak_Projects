@@ -1,3 +1,5 @@
+import datetime
+import uuid
 import pytest
 import jwt
 import os
@@ -13,7 +15,7 @@ def auth_token():
         "roles": ["admin"],
         "scopes": ["memory.read", "memory.write", "memory.admin"],
     }
-    token = jwt.encode(payload, secret, algorithm="HS256")
+    token = jwt.encode({**payload, "iss": "pinak-memory", "aud": "pinak-memory-api", "jti": str(uuid.uuid4()), "exp": payload.get("exp", datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5))}, secret, algorithm="HS256")
     return token
 
 @pytest.fixture

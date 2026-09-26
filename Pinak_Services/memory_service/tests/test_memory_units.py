@@ -1,3 +1,5 @@
+import datetime
+import uuid
 """Scoped cross-layer identity, long-event recall, and HTTP authorization."""
 import jwt
 from pathlib import Path
@@ -9,7 +11,9 @@ from app.core.database import DatabaseManager
 
 def _token(tenant='a', project='p', role='admin', scopes=None):
     return jwt.encode({'sub': 'fixture', 'tenant': tenant, 'project_id': project,
-                       'roles': [role], 'scopes': scopes or ['memory.read', 'memory.admin']},
+                       'roles': [role], 'scopes': scopes or ['memory.read', 'memory.admin'],
+                       'iss': 'pinak-memory', 'aud': 'pinak-memory-api', 'jti': str(uuid.uuid4()),
+                       'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)},
                       'test-secret', algorithm='HS256')
 
 

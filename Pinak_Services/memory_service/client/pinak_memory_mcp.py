@@ -51,6 +51,7 @@ def _get_token() -> str:
             token = token[7:].strip()
         return token
     from datetime import datetime, timezone, timedelta
+    import uuid
     if not PINAK_SECRET or PINAK_SECRET in {"secret", "dev-secret-change-me"}:
         raise RuntimeError("Set a non-default PINAK_JWT_SECRET or provide PINAK_JWT_TOKEN")
 
@@ -65,13 +66,17 @@ def _get_token() -> str:
         "client_id": PINAK_CLIENT_ID,
         "parent_client_id": PINAK_PARENT_CLIENT_ID,
         "child_client_id": PINAK_CHILD_CLIENT_ID,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+        "iss": os.getenv("PINAK_JWT_ISSUER", "pinak-memory"),
+        "aud": os.getenv("PINAK_JWT_AUDIENCE", "pinak-memory-api"),
+        "jti": str(uuid.uuid4()),
     }
     try:
         import jwt
         return jwt.encode(payload, PINAK_SECRET, algorithm="HS256")
-    except Exception:
-        return _encode_jwt_hs256(payload, PINAK_SECRET)
+    except ImportError:
+        serializable = {**payload, "exp": int(payload["exp"].timestamp())}
+        return _encode_jwt_hs256(serializable, PINAK_SECRET)
 
 
 def _api_request(method: str, endpoint: str, json_data: dict = None, params: dict = None) -> Dict[str, Any]:

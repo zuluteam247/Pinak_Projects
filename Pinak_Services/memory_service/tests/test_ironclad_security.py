@@ -1,3 +1,5 @@
+import datetime
+import uuid
 import os
 import pytest
 import jwt
@@ -26,7 +28,7 @@ def test_require_auth_context_invalid_token(jwt_secret):
     assert "Invalid token" in exc.value.detail
 
 def test_require_auth_context_expired_token(jwt_secret):
-    token = jwt.encode({"exp": 0}, jwt_secret, algorithm="HS256")
+    token = jwt.encode({"exp": 0, "iss": "pinak-memory", "aud": "pinak-memory-api", "jti": str(uuid.uuid4())}, jwt_secret, algorithm="HS256")
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
     with pytest.raises(HTTPException) as exc:
         require_auth_context(creds)
@@ -34,7 +36,7 @@ def test_require_auth_context_expired_token(jwt_secret):
     assert "Token expired" in exc.value.detail
 
 def test_require_auth_context_missing_tenant(jwt_secret):
-    token = jwt.encode({"project_id": "p1"}, jwt_secret, algorithm="HS256")
+    token = jwt.encode({"project_id": "p1", "iss": "pinak-memory", "aud": "pinak-memory-api", "jti": str(uuid.uuid4()), "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)}, jwt_secret, algorithm="HS256")
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
     with pytest.raises(HTTPException) as exc:
         require_auth_context(creds)
@@ -50,7 +52,7 @@ def test_require_auth_context_valid(jwt_secret):
         "scopes": ["memory.read", "memory.write"],
         "client_name": "codex"
     }
-    token = jwt.encode(payload, jwt_secret, algorithm="HS256")
+    token = jwt.encode({**payload, "iss": "pinak-memory", "aud": "pinak-memory-api", "jti": str(uuid.uuid4()), "exp": payload.get("exp", datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5))}, jwt_secret, algorithm="HS256")
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
     context = require_auth_context(creds)
     
@@ -73,7 +75,7 @@ def test_require_auth_context_header_overrides(jwt_secret):
         "parent_client_id": "parent-client",
         "child_client_id": "child-client",
     }
-    token = jwt.encode(payload, jwt_secret, algorithm="HS256")
+    token = jwt.encode({**payload, "iss": "pinak-memory", "aud": "pinak-memory-api", "jti": str(uuid.uuid4()), "exp": payload.get("exp", datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5))}, jwt_secret, algorithm="HS256")
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
     context = require_auth_context(
         creds,

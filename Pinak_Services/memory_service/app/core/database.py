@@ -293,6 +293,15 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_memory_unit_record
                 ON memory_unit_members (tenant, project_id, layer, record_id);
             """)
+            # Revocation records are kept until token expiry. A revoked jti is
+            # globally unique within this signing issuer, across tenant scopes.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS revoked_jti (
+                    jti TEXT PRIMARY KEY,
+                    expires_at TEXT NOT NULL,
+                    revoked_at TEXT NOT NULL
+                );
+            """)
             # 11. Audit Log (Tamper-evident)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS logs_audit (
@@ -624,6 +633,52 @@ class DatabaseManager:
                 rows.append(d)
             return rows
 
+    def revoke_jti(self, jti: str, expires_at: datetime.datetime) -> None:
+        """Revoke a token id; caller must separately authorize revocation."""
+        if not isinstance(jti, str) or not jti or len(jti) > 256:
+            raise ValueError("Invalid token id")
+        if expires_at.tzinfo is None:
+            raise ValueError("Expiry must be timezone-aware")
+        with self.get_cursor() as conn:
+            conn.execute("INSERT OR REPLACE INTO revoked_jti VALUES (?, ?, ?)",
+                         (jti, expires_at.isoformat(), datetime.datetime.now(datetime.timezone.utc).isoformat()))
+
+    def is_jti_revoked(self, jti: str) -> bool:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with self.get_cursor() as conn:
+            return bool(conn.execute("SELECT 1 FROM revoked_jti WHERE jti=? AND expires_at>?",
+                                     (jti, now)).fetchone())
+
+    def prune_expired_jti(self) -> int:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with self.get_cursor() as conn:
+            return conn.execute("DELETE FROM revoked_jti WHERE expires_at<=?", (now,)).rowcount
+
+    def prune_access_events(self, older_than: datetime.datetime) -> int:
+        """Prune scoped access rows, not the tamper-evident global audit chain."""
+        if older_than.tzinfo is None:
+            raise ValueError("Cutoff must be timezone-aware")
+        # Existing logs use naive local ISO timestamps; SQLite string order is
+        # not safe across offsets, so parse timestamps before deletion.
+        cutoff = older_than.astimezone(datetime.timezone.utc)
+        removed = 0
+        with self.get_cursor() as conn:
+            rows = conn.execute("SELECT id, ts FROM logs_access").fetchall()
+            stale = []
+            for row in rows:
+                try:
+                    stamp = datetime.datetime.fromisoformat(row["ts"])
+                except ValueError:
+                    continue
+                if stamp.tzinfo is None:
+                    stamp = stamp.astimezone()  # Legacy naive rows used server local time
+                if stamp.astimezone(datetime.timezone.utc) < cutoff:
+                    stale.append((row["id"],))
+            if stale:
+                conn.executemany("DELETE FROM logs_access WHERE id=?", stale)
+                removed = len(stale)
+        return removed
+
     def add_access_event(self, event_type: str, status: str, tenant: str, project_id: str,
                          agent_id: Optional[str] = None, client_name: Optional[str] = None,
                          client_id: Optional[str] = None, parent_client_id: Optional[str] = None,
@@ -631,7 +686,9 @@ class DatabaseManager:
                          query: Optional[str] = None, memory_id: Optional[str] = None,
                          result_count: Optional[int] = None, detail: Optional[str] = None) -> Dict[str, Any]:
         mid = str(uuid.uuid4())
-        ts = datetime.datetime.now().isoformat()
+        ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        # Limit query text in both access rows and immutable audit payloads.
+        query = query[:256] if query is not None else None
         with self.get_cursor() as cur:
             cur.execute("""
                 INSERT INTO logs_access (id, agent_id, client_name, client_id, parent_client_id, child_client_id, event_type, target_layer, query, memory_id, result_count, status, detail, tenant, project_id, ts)

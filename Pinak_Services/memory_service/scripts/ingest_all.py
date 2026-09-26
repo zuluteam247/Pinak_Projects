@@ -1,5 +1,6 @@
 
 import os
+import uuid
 import sys
 import httpx
 import jwt
@@ -26,7 +27,10 @@ def mint_token() -> str:
         "project_id": PROJECT_ID,
         "role": "admin",
         "scopes": ["memory.write", "memory.read"],
-        "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+        "iss": os.getenv("PINAK_JWT_ISSUER", "pinak-memory"),
+        "aud": os.getenv("PINAK_JWT_AUDIENCE", "pinak-memory-api"),
+        "jti": str(uuid.uuid4())
     }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 

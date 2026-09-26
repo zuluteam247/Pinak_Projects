@@ -236,7 +236,9 @@ Headers:
 
 Manual approval: first‑time clients are `registered`. Mark them **trusted** in TUI → Clients tab.
 
-Prefer `PINAK_JWT_TOKEN` for clients (no shared secret required).
+Prefer `PINAK_JWT_TOKEN` for clients (no shared secret required). Tokens now require `exp`, `iss`, `aud`, and a unique `jti`; default issuer is `pinak-memory`, default audience is `pinak-memory-api`, overridden by `PINAK_JWT_ISSUER` and `PINAK_JWT_AUDIENCE`. Legacy tokens without these claims are rejected. Rotate or reissue them before upgrading the service. CLI development tokens expire after one hour; MCP and ingestion-script tokens expire after 15 minutes. Revoke an issued `jti` by calling `DatabaseManager.revoke_jti(jti, expires_at)` against the service's `data/memory.db` (or configured `PINAK_DATA_ROOT/memory.db`) in a trusted operator context; there is no public revocation endpoint. Revocation takes effect at the next authenticated request. Back up the revocation table with the DB, and do not serve requests from a snapshot missing active revocations.
+
+Access-event queries are truncated to 256 characters before storage in both `logs_access` and the immutable audit payload. The hourly cleanup keeps `logs_access` for 90 days by default; set `PINAK_ACCESS_LOG_RETENTION_DAYS` to a positive integer to change that interval. This is not retroactive redaction of historical audit payloads, which may still contain full queries. The audit chain is not pruned: finite audit retention requires a future epoch rollover with externally held checkpoints and a restore-time verification rule. OpenTimestamps anchoring remains a separate, un-deployed design; no external anchor is configured by this batch.
 
 ### Schemas & Templates
 - Local canonical: `~/pinak-memory/schemas`, `~/pinak-memory/templates`

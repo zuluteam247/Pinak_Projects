@@ -1,3 +1,4 @@
+import uuid
 """Disposable DB regression for scoped MCP/API primitives."""
 import json
 from pathlib import Path
@@ -79,6 +80,7 @@ def test_unsigned_client_header_cannot_claim_trusted_identity(monkeypatch):
         'sub': 'agent', 'tenant': 'a', 'project_id': 'p',
         'client_id': 'ordinary', 'roles': ['agent'], 'scopes': ['memory.read'],
         'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5),
+        'iss': 'pinak-memory', 'aud': 'pinak-memory-api', 'jti': str(uuid.uuid4()),
     }, 'sandbox-test-key-at-least-thirty-two-chars', algorithm='HS256')
     cred = HTTPAuthorizationCredentials(scheme='Bearer', credentials=token)
     with pytest.raises(HTTPException) as exc:

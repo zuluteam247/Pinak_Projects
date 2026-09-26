@@ -1,4 +1,5 @@
 """Disposable HTTP negative/edge test. Run ONLY against a fresh local fixture DB."""
+import uuid
 import datetime,json,os,concurrent.futures
 from pathlib import Path
 import httpx,jwt
@@ -10,7 +11,7 @@ assert BASE.startswith('http://127.0.0.1:') or BASE.startswith('http://localhost
 def token(tenant='security-a',project='p',scopes=('memory.read','memory.write'),roles=('agent',),client='fixture-security',expired=False):
  now=datetime.datetime.now(datetime.timezone.utc)
  claims={'sub':'fixture','tenant':tenant,'project_id':project,'client_id':client,'roles':list(roles),'scopes':list(scopes),'exp':now+datetime.timedelta(minutes=-1 if expired else 10)}
- return jwt.encode(claims,SECRET,algorithm='HS256')
+ return jwt.encode({**claims, "iss": "pinak-memory", "aud": "pinak-memory-api", "jti": str(uuid.uuid4())},SECRET,algorithm='HS256')
 
 
 def request(method,path,auth=None,body=None,params=None,headers=None):
@@ -33,7 +34,7 @@ def main():
  out.append(check('missing bearer',request('GET','/memory/events'),[401]))
  out.append(check('bad JWT',request('GET','/memory/events',auth='not.a.jwt'),[401]))
  out.append(check('expired JWT',request('GET','/memory/events',auth=token(expired=True)),[401]))
- out.append(check('missing tenant',request('GET','/memory/events',auth=jwt.encode({'sub':'fixture','project_id':'p','scopes':['memory.read'],'exp':datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(minutes=5)},SECRET,algorithm='HS256')),[403]))
+ out.append(check('missing tenant',request('GET','/memory/events',auth=jwt.encode({'sub':'fixture','project_id':'p','scopes':['memory.read'],'exp':datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(minutes=5),'iss':'pinak-memory','aud':'pinak-memory-api','jti':str(uuid.uuid4())},SECRET,algorithm='HS256')),[403]))
  out.append(check('read scope required',request('GET','/memory/events',auth=token(scopes=('memory.write',))),[403]))
  out.append(check('admin role required',request('POST','/memory/maintenance/verify',auth=token(scopes=('memory.admin',))),[403]))
  out.append(check('unsigned client header',request('GET','/memory/events',auth=auth,headers={'X-Pinak-Client-Id':'trusted-other'}),[403]))

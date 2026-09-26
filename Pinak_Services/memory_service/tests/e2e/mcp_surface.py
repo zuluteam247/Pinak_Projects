@@ -1,3 +1,5 @@
+import datetime
+import uuid
 import asyncio,json,os,datetime,jwt
 from pathlib import Path
 from fastmcp import Client
@@ -9,7 +11,7 @@ results=[]
 def mint(tenant='sandbox-tenant',project='sandbox-project',admin=False,read=True,write=True):
  now=datetime.datetime.now(datetime.timezone.utc)
  claims={'sub':'fixture-admin' if admin else 'fixture-agent','tenant':tenant,'project_id':project,'client_id':'mcp-fixture','client_name':'mcp-fixture','roles':['admin'] if admin else ['agent'],'scopes':(['memory.read'] if read else [])+(['memory.write'] if write else [])+(['memory.admin'] if admin else []),'iat':now,'exp':now+datetime.timedelta(minutes=10)}
- return jwt.encode(claims,base['PINAK_JWT_SECRET'],algorithm='HS256')
+ return jwt.encode({**claims, "iss": "pinak-memory", "aud": "pinak-memory-api", "jti": str(uuid.uuid4())},base['PINAK_JWT_SECRET'],algorithm='HS256')
 async def session(label,token,ops):
  env={**base,'PINAK_JWT_TOKEN':token}
  async with Client(StdioTransport(os.environ.get('PINAK_MCP_PYTHON', 'python3'),[server],env=env,cwd=str(Path(__file__).resolve().parents[2]),keep_alive=False,log_file=Path(os.environ.get('PINAK_MCP_SERVER_LOG', '/tmp/pinak-mcp-server.log')))) as client:

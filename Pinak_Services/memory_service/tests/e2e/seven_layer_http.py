@@ -1,10 +1,11 @@
+import uuid
 import datetime, json, os
 import httpx,jwt
 from pathlib import Path
 base=os.environ.get('PINAK_API_URL', 'http://127.0.0.1:18765/api/v1'); secret=os.environ['PINAK_JWT_SECRET']
 assert base.startswith('http://127.0.0.1:') or base.startswith('http://localhost:'), 'Refuse remote target'
 now=datetime.datetime.now(datetime.timezone.utc)
-token=jwt.encode({'sub':'sandbox-agent','tenant':'sandbox-tenant','project_id':'sandbox-project','roles':['agent'],'scopes':['memory.read','memory.write'],'client_id':'sandbox-agent','iat':now,'exp':now+datetime.timedelta(minutes=30)},secret,algorithm='HS256')
+token=jwt.encode({'sub':'sandbox-agent','tenant':'sandbox-tenant','project_id':'sandbox-project','roles':['agent'],'scopes':['memory.read','memory.write'],'client_id':'sandbox-agent','iat':now,'exp':now+datetime.timedelta(minutes=30),'iss':'pinak-memory','aud':'pinak-memory-api','jti':str(uuid.uuid4())},secret,algorithm='HS256')
 headers={'Authorization':'Bearer '+token}; results=[]
 def call(layer,method,path,payload=None,params=None):
  with httpx.Client(base_url=base,headers=headers,timeout=20) as client: response=client.request(method,path,json=payload,params=params)

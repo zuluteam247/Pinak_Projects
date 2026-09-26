@@ -1,6 +1,7 @@
 import json
 import httpx
 import os
+import uuid
 import sys
 
 import jwt
@@ -21,7 +22,10 @@ def get_token():
         "project_id": PROJECT,
         "role": "agent",
         "scopes": ["memory.write"],
-        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+        "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=15),
+        "iss": os.getenv("PINAK_JWT_ISSUER", "pinak-memory"),
+        "aud": os.getenv("PINAK_JWT_AUDIENCE", "pinak-memory-api"),
+        "jti": str(uuid.uuid4())
     }
     return jwt.encode(payload, secret, algorithm=algo)
 

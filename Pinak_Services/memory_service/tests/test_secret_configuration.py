@@ -36,7 +36,7 @@ def test_cli_mint_requires_secret_and_has_scopes(monkeypatch):
     monkeypatch.setenv('PINAK_JWT_SECRET', 'a-local-unique-test-key')
     result = runner.invoke(app, ['mint', 'tenant'])
     assert result.exit_code == 0
-    payload = jwt.decode(result.stdout.strip(), 'a-local-unique-test-key', algorithms=['HS256'])
+    payload = jwt.decode(result.stdout.strip(), 'a-local-unique-test-key', algorithms=['HS256'], audience='pinak-memory-api')
     assert payload['scopes'] == ['memory.read', 'memory.write']
 
 
@@ -51,7 +51,7 @@ def test_cli_search_uses_read_only_scope(monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *_): pass
         def get(self, url, params, headers):
-            token_payloads.append(jwt.decode(headers['Authorization'][7:], 'a-local-unique-test-key', algorithms=['HS256']))
+            token_payloads.append(jwt.decode(headers['Authorization'][7:], 'a-local-unique-test-key', algorithms=['HS256'], audience='pinak-memory-api'))
             return FakeResponse()
     monkeypatch.setattr(httpx, 'Client', FakeClient)
     result = CliRunner().invoke(app, ['search', 'item'])

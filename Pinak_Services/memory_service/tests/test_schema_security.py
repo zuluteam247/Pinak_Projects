@@ -1,3 +1,4 @@
+import uuid
 import datetime
 import jwt
 import pytest
@@ -21,7 +22,7 @@ def _issue_token():
         "iat": datetime.datetime.utcnow(),
         "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=5),
     }
-    return jwt.encode(payload, "test-secret", algorithm="HS256")
+    return jwt.encode({**payload, "iss": "pinak-memory", "aud": "pinak-memory-api", "jti": str(uuid.uuid4()), "exp": payload.get("exp", datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5))}, "test-secret", algorithm="HS256")
 
 
 def test_schema_requires_auth():
