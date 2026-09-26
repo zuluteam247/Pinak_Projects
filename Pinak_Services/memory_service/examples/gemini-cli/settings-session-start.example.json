@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "name": "pinak-memory-session-start",
+            "type": "command",
+            "command": "python3 /ABSOLUTE/PATH/TO/scripts/gemini_session_start.py"
+          }
+        ]
+      }
+    ]
+  }
+}
