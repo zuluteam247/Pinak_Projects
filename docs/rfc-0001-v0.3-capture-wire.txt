@@ -1,0 +1,216 @@
+RFC-0001 - PINAK MEMORY CAPTURE-WIRE CONTRACT
+v0.3-draft - 2026-09-28 - author: Fo
+Status: PROPOSED. Not frozen. Supersedes the v0.2 text posted at P-79 #comment-33936f15, which is WITHDRAWN.
+
+0. WHAT THIS DOCUMENT IS AND IS NOT
+
+This is a subcontract, not a replacement architecture. The governing document is the
+owner-authored PINAK MEMORY V2 - ARCHITECTURE CONTRACT (RFC-0001, v2.0-draft, 2026-09-26),
+posted at P-79 #comment-dde943b7, as amended by the consolidated amendment at
+P-79 #comment-4da4012a. Where this document and either of those disagree, they win and
+this document is wrong and must be corrected.
+
+Scope of this document: the wire behaviour of the capture endpoint only, sufficient to
+build and test slices 1a through 1f. Everything else in the architecture contract remains
+in force and is listed in section 9 with an explicit disposition.
+
+The product frame is unchanged and restated so no implementer loses it: Pinak Memory is a
+client- and agent-independent memory infrastructure that captures attributable interaction
+events, governs their transformation into durable memory, preserves provenance and
+lifecycle, and exposes consistent recall to any conforming agent. MCP is one interface,
+not the architecture.
+
+1. BYTE-BOUNDARY RULE (how to reproduce the checksum)
+
+The artifact is this file and only this file. Encoding UTF-8, no BOM. Line endings LF
+(0x0A) only. Exactly one trailing newline at end of file. No trailing whitespace on any
+line. The checksum is SHA-256 over the complete byte sequence of the file, first byte to
+last, including the trailing newline. Rendered copies of this text inside a Linear comment,
+an email, or a chat message are NOT the artifact and will not reproduce the checksum. This
+rule exists because the v0.2 attempt published a checksum over text that could only be
+recovered by re-rendering a comment, which is what broke reproduction (2,352 bytes observed
+against 2,361 claimed).
+
+2. ROUTE AND AUTH BINDING
+
+2.1 Route: POST /api/v1/memory/capture, under the existing router, inheriting the auth and
+readiness guard already exercised there. The choice is recorded rather than silently taken.
+A later move to a top-level /v1/capture is a rename with a redirect once the pipeline is
+real.
+
+2.2 tenant_id, agent_id and client_id are bound to the authenticated claim. A header or
+body field carrying any of them is a hint to match against, never a source of identity. A
+mismatch is 403 auth_binding_mismatch. It is never a silent overwrite of one by the other.
+
+2.3 Isolation: every read and write is scoped by tenant_id. There is no cross-tenant path.
+
+3. IDENTITY MODEL (from the architecture contract, section 3, unchanged)
+
+These four are NOT interchangeable and no adapter may collapse them:
+
+  session_id  the identifier for a logical agent interaction
+  task_id     the identifier for the work being accomplished, spanning sessions
+  agent_id    the identity of the agent participating
+  client_id   the application or interface the agent operates through
+
+The test the model must pass: one task_id T-1042 observed across session_1 (AGY),
+session_2 (Gemini) and session_3 (human/API), with agent_1 pinak and agent_2 zulu, must
+leave a third agent able to recall what both established.
+
+3.1 session identity is service-minted (amendment). The client does not invent session_id.
+The service mints it and returns it; the client echoes it on subsequent events.
+
+3.2 task identity is late-bound (amendment). task_id may be absent at first capture and
+bound afterwards. An event captured before binding is not orphaned; it is associated when
+the binding lands. task_id is REQUIRED in the canonical envelope and MAY be null only in
+the pre-binding window, which the service records.
+
+4. CANONICAL ENVELOPE (owner field table, adopted whole)
+
+Field            Type            Req   Meaning
+tenant_id        string / ULID   REQ   Isolation boundary. All queries scoped.
+agent_id         string          REQ   Identity of participating agent.
+client_id        string          REQ   Application or interface: agy, gemini-cli, api, human.
+client_version   semver          REQ   Client build, for compatibility and rollback.
+session_id       ULID            REQ   Logical agent interaction. Not task. Service-minted.
+task_id          string / ULID   REQ   Work being accomplished. Cross-session. Late-bound.
+event_id         ULID            REQ   Globally unique, time-sortable.
+sequence         u64             REQ   Monotonic per (tenant, session). Gap detection.
+client_ts        RFC3339         REQ   Client wall-clock, as sent.
+received_ts      RFC3339         REQ   Service receipt time. Service-assigned, authoritative.
+actor            enum            REQ   user | agent | tool | system | policy
+event_type       enum            REQ   message | tool_call | tool_result | response | decision | boundary
+payload          json            REQ   Observable event content. Redactable.
+payload_hash     sha256          REQ   Integrity of payload AFTER redaction.
+boundary_source  enum            REQ   Where the boundary was detected.
+source           enum            REQ   Origin of the event.
+provenance       object          REQ   Why the system believes this. Carried, never derived by the client.
+privacy_class    enum            REQ   Service-assigned. Client may not set it.
+retention_class  enum            REQ   Service-assigned. Client may not set it.
+envelope_version string          REQ   Contract version of this envelope.
+
+4.1 event_id is a ULID, not a UUIDv4. The v0.2 draft said UUIDv4; that was a departure from
+the owner table and is corrected here. ULID is required because the table calls for
+time-sortable ids.
+
+4.2 The v0.2 draft used occurred_at, kind, source and body. Those names are withdrawn. The
+owner table's names are canonical.
+
+4.3 privacy_class and retention_class are assigned by the service, not the client, and are
+applied before first persistence. A client-supplied value is rejected, not overridden
+silently.
+
+4.4 Hidden reasoning is not a payload field of any event_type, including decision
+(amendment). There is no field for it and none may be added by an adapter.
+
+5. VALIDATION, FAIL-CLOSED
+
+5.1 Order of operations, and it is not negotiable: authenticate and bind identity, then
+validate schema, then enforce the size ceiling, then REDACT, then persist, then hash the
+redacted payload. A canonical payload_hash computed before redaction is a defect.
+
+5.2 Unknown value in a closed enum (actor, event_type, boundary_source, source) is 422.
+
+5.3 Unknown envelope_version is 400, and the response names the supported range. The
+service accepts N and N-1 and ships migration tests for the pair.
+
+5.4 Size ceiling: 256 KiB per capture event, owner-locked. Oversize is rejected with 422
+event_too_large. Never truncated.
+
+5.5 Error bodies carry no payload content, redacted or otherwise.
+
+6. IDEMPOTENCY, CONFLICT AND SEQUENCE (amendment, adopted verbatim in substance)
+
+6.1 The idempotency key is the authenticated (tenant, client, session, sequence) plus the
+canonical redacted payload_hash. event_id alone is not the key.
+
+6.2 Same key and same canonical redacted payload_hash is a no-op retry and returns 200.
+The v0.2 draft returned 409 for every repeat; that was wrong and is corrected.
+
+6.3 Same key and different content is 409 with a SANITIZED conflict record. Full conflicting
+payloads are never written to an unredacted audit trail.
+
+6.4 A lower unused sequence is out-of-order, not a duplicate, and is accepted as such.
+
+6.5 A gap in sequence is a coverage observation, not a failed ingest, and is recorded as one.
+
+6.6 The sequence counter persists across adapter restart and is stored with the session ref.
+
+7. STAGING, RETENTION AND THE PHASE GATE
+
+7.1 Capture writes to recall-blind staging with tenant isolation. Staging is invisible to
+recall; that is the critical rule from the architecture contract and it is a test, not a
+convention.
+
+7.2 Staging is NOT the existing memory_quarantine table, which is proposed-memory staging
+and a different thing.
+
+7.3 Raw events carry a 30-day TTL as an explicit expiry rule, with an audit tombstone on
+expiry and a cleanup test. No silent extension.
+
+7.4 Until 1b (server-side redaction) and 1c (recall-blind staging and TTL) exist and pass,
+the route returns a non-accepting response and writes nothing anywhere. Never 202. This is
+an invariant of the phase, not a temporary posture.
+
+8. RESPONSE CODES
+
+200 no-op retry, same key and same redacted hash
+202 accepted - NOT AVAILABLE until 1b and 1c pass
+400 unknown envelope_version, response names the supported range
+401 unauthenticated
+403 auth_binding_mismatch
+409 same key, different content; sanitized conflict record
+422 unknown enum value; event_too_large at over 256 KiB; schema violation
+429 rate limited
+503 capture_disabled, the phase gate in 7.4
+
+9. DISPOSITION OF THE ARCHITECTURE CONTRACT SECTIONS NOT RESTATED HERE
+
+These are IN FORCE under the owner document. This subcontract does not narrow, replace or
+defer them; it simply does not restate them, and no implementer may read their absence here
+as their absence from the contract.
+
+  Agent-independence and the layering Any Agent/Client -> Capture & Identity ->
+    Memory Core -> Classification/Governance -> Stores -> Recall    IN FORCE
+  Governance of promotion from event to durable memory                IN FORCE, Phase 2
+  Lifecycle and status (active and its transitions)                   IN FORCE, Phase 2
+  Provenance: every promoted memory answers why the system
+    believes it                                                       IN FORCE, carried at capture
+  Conflicts and relationship concepts (supersedes, conflicts-with,
+    corroborates, derived-from, invalidates)                          IN FORCE, Phase 2
+  Recall read path and recall-blindness proof                         IN FORCE, 1f and Phase 2
+  Observability                                                       IN FORCE, not yet sliced
+  Conformance standard a new agent must pass                          IN FORCE, 0e and 1f
+  Roadmap and the atomic PRD breakdown                                IN FORCE, board-tracked
+
+10. WHAT THIS DOCUMENT CHANGES AGAINST v0.2, LINE BY LINE
+
+  event_id UUIDv4                 -> ULID                              corrected
+  occurred_at / kind / source /
+    body                          -> owner canonical field names       corrected
+  no tenant/agent/task fields     -> full owner table adopted          corrected
+  no client_ts / received_ts      -> both, received_ts authoritative   added from amendment
+  session_id client-supplied      -> service-minted                    corrected
+  task_id absent                  -> present, late-bound               added
+  no privacy / retention class    -> service-assigned, pre-persistence added
+  no redaction ordering           -> redact before persist and hash    added
+  no raw TTL                      -> 30 days, tombstone, cleanup test  added
+  409 on every repeat             -> 200 no-op / 409 sanitized /
+                                     out-of-order                      corrected
+  unknown enum 400                -> 422                               corrected
+  unknown version 400             -> 400 naming supported range        kept, clarified
+  256 KiB reject-not-truncate     -> unchanged                         kept
+  non-accepting 1a gate           -> unchanged                         kept
+  schema_version rfc-0001/v0.2    -> envelope_version, N/N-1           corrected
+
+11. OPEN, FOR THE OWNER
+
+11.1 Freeze or reject this as the capture-wire subcontract of the architecture contract.
+11.2 Confirm the enum member lists for boundary_source and source, which the owner table
+names but does not enumerate. They are deliberately left unenumerated here rather than
+invented.
+11.3 Confirm the privacy_class and retention_class member lists and their service-assigned
+defaults, same reason.
+
+Nothing downstream of this document (1a field-level PRD, the conformance suite) starts
+until 11.1 is answered.
