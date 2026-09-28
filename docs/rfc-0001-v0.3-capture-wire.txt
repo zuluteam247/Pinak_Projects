@@ -85,8 +85,8 @@ payload_hash     sha256          REQ   Integrity of payload AFTER redaction.
 boundary_source  enum            REQ   Where the boundary was detected.
 source           enum            REQ   Origin of the event.
 provenance       object          REQ   Why the system believes this. Carried, never derived by the client.
-privacy_class    enum            REQ   Service-assigned. Client may not set it.
-retention_class  enum            REQ   Service-assigned. Client may not set it.
+privacy_class    enum            REQ   Service-assigned, settled. Client may not set it. See 4.5.
+retention_class  enum            REQ   Service-assigned, settled. Client may not set it. See 4.5.
 envelope_version string          REQ   Contract version of this envelope.
 
 4.1 event_id is a ULID, not a UUIDv4. The v0.2 draft said UUIDv4; that was a departure from
@@ -99,6 +99,36 @@ owner table's names are canonical.
 4.3 privacy_class and retention_class are assigned by the service, not the client, and are
 applied before first persistence. A client-supplied value is rejected, not overridden
 silently.
+
+4.5 privacy_class and retention_class member lists and defaults are SETTLED by the
+consolidated amendment (P-79 #comment-4da4012a) and are restated here unchanged. They are
+not open and are not this document's to propose.
+
+  privacy_class    public | internal | confidential | restricted
+  retention_class  ephemeral | session | task | durable | legal_hold
+
+Defaults and rules, in force as written in the amendment:
+  - Ordinary work is internal.
+  - A secret or credential match is restricted, and is redacted before persistence.
+  - A raw staged event is task, with a 30-day TTL, unless it is promoted or attached to an
+    open task.
+  - legal_hold is set only on explicit owner action.
+  - The service assigns both classes. The client never does.
+
+An earlier draft of this document (P-79 #comment-0a0a9d45) proposed public/internal/
+sensitive/secret and ephemeral/standard/extended/permanent. Those proposals are WITHDRAWN
+and must not be implemented.
+
+4.6 boundary_source and source member lists are NOT settled and are NOT owner-ratified.
+The owner table names both fields but does not enumerate them, and the owner has not
+chosen member lists. Pinak's working recommendation, recorded here as a recommendation
+only, is:
+
+  boundary_source  session_start | session_end | task_switch | client_hook |
+                   service_timeout | explicit_marker
+  source           hook | cli | api | import | system
+
+1a must not implement these as approved values while the choice is open.
 
 4.4 Hidden reasoning is not a payload field of any event_type, including decision
 (amendment). There is no field for it and none may be added by an adapter.
@@ -206,11 +236,11 @@ as their absence from the contract.
 11. OPEN, FOR THE OWNER
 
 11.1 Freeze or reject this as the capture-wire subcontract of the architecture contract.
-11.2 Confirm the enum member lists for boundary_source and source, which the owner table
-names but does not enumerate. They are deliberately left unenumerated here rather than
-invented.
-11.3 Confirm the privacy_class and retention_class member lists and their service-assigned
-defaults, same reason.
+11.2 Choose the enum member lists for boundary_source and source, which the owner table
+names but does not enumerate. Pinak's working recommendation is recorded at 4.6 as a
+recommendation only. It is not ratified and 1a does not implement it until it is.
+11.3 Nothing to decide. privacy_class and retention_class are settled by the amendment and
+are restated unchanged at 4.5. This item is closed.
 
 Nothing downstream of this document (1a field-level PRD, the conformance suite) starts
 until 11.1 is answered.
