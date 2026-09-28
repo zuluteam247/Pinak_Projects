@@ -299,10 +299,9 @@ def _ensure_db(report: DoctorReport, fix: bool) -> None:
 def _get_vector_index_size(vec_path: str) -> Optional[int]:
     if not os.path.exists(vec_path):
         return None
-    data = np.load(vec_path, allow_pickle=True)
-    if hasattr(data, "item") and isinstance(data.item(), dict):
-        return len(data.item().get("ids", []))
-    return data.shape[0]
+    from app.services.vector_snapshot import read_snapshot
+    _, ids = read_snapshot(vec_path)
+    return len(ids)
 
 
 def _get_db_vector_count(db_path: str) -> int:
@@ -323,7 +322,11 @@ def _get_db_vector_count(db_path: str) -> int:
 def _ensure_vectors(report: DoctorReport, fix: bool, allow_heavy: bool) -> None:
     vec_path = _get_vector_path()
     db_path = _get_db_path()
-    index_size = _get_vector_index_size(vec_path)
+    try:
+        index_size = _get_vector_index_size(vec_path)
+    except ValueError as exc:
+        report.add_issue(f"vector snapshot invalid: {exc}")
+        return
     if index_size is None:
         if fix and allow_heavy:
             service = MemoryService()

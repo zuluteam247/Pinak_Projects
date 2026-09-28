@@ -14,7 +14,11 @@ import shutil
 import sqlite3
 import tempfile
 
-import numpy as np
+# Also support the README's direct `python scripts/backup_verified.py` route.
+if __package__ in (None, ""):
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.services.vector_snapshot import read_snapshot
 
 TABLES = ("memories_semantic", "memories_episodic", "memories_procedural")
 
@@ -33,12 +37,14 @@ def ids_match(database, vectors):
         for table in TABLES:
             db_ids.update(row[0] for row in conn.execute(
                 f"SELECT embedding_id FROM {table} WHERE embedding_id IS NOT NULL"))
-        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "SQLite integrity check failed"
-    with open(vectors, "rb") as handle:
-        data = np.load(handle, allow_pickle=True).item()
-    vector_ids = Counter(int(value) for value in data["ids"])
-    assert len(data["vectors"]) == sum(vector_ids.values()), "Vector shape mismatch"
-    assert db_ids == vector_ids, "Database/vector ID mismatch: pause writes and retry"
+        if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise AssertionError("SQLite integrity check failed")
+    snapshot_vectors, snapshot_ids = read_snapshot(vectors)
+    vector_ids = Counter(int(value) for value in snapshot_ids)
+    if len(snapshot_vectors) != sum(vector_ids.values()):
+        raise AssertionError("Vector shape mismatch")
+    if db_ids != vector_ids:
+        raise AssertionError("Database/vector ID mismatch: pause writes and retry")
     return sum(db_ids.values())
 
 
@@ -60,10 +66,12 @@ def create_backup(data_dir, backup_root):
             file_names = ("memory.db", "vectors.index.npy")
         else:
             with sqlite3.connect(staging / "memory.db") as conn:
-                assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+                if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise AssertionError("SQLite integrity check failed")
                 count = sum(conn.execute(f"SELECT count(*) FROM {table} WHERE embedding_id IS NOT NULL")
                             .fetchone()[0] for table in TABLES)
-            assert count == 0, "Missing vector snapshot for an indexed database"
+            if count != 0:
+                raise AssertionError("Missing vector snapshot for an indexed database")
             file_names = ("memory.db",)
         manifest = {"created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     "vectors": count, "files": {name: digest(staging / name) for name in file_names}}
@@ -81,17 +89,24 @@ def verify_backup(directory):
     directory = Path(directory)
     manifest = json.loads((directory / "manifest.json").read_text())
     for name in manifest["files"]:
-        assert digest(directory / name) == manifest["files"][name], f"Checksum mismatch: {name}"
-    assert set(manifest["files"]) in ({"memory.db"}, {"memory.db", "vectors.index.npy"})
-    assert {name for name in ("memory.db", "vectors.index.npy") if (directory / name).is_file()} == set(manifest["files"])
+        if digest(directory / name) != manifest["files"][name]:
+            raise AssertionError(f"Checksum mismatch: {name}")
+    if set(manifest["files"]) not in ({"memory.db"}, {"memory.db", "vectors.index.npy"}):
+        raise AssertionError("Invalid backup manifest file set")
+    if {name for name in ("memory.db", "vectors.index.npy") if (directory / name).is_file()} != set(manifest["files"]):
+        raise AssertionError("Backup file set mismatch")
     if "vectors.index.npy" in manifest["files"]:
-        assert ids_match(directory / "memory.db", directory / "vectors.index.npy") == manifest["vectors"]
+        if ids_match(directory / "memory.db", directory / "vectors.index.npy") != manifest["vectors"]:
+            raise AssertionError("Backup vector count mismatch")
     else:
         with sqlite3.connect(directory / "memory.db") as conn:
-            assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-            assert manifest["vectors"] == 0
-            assert all(conn.execute(f"SELECT count(*) FROM {table} WHERE embedding_id IS NOT NULL")
-                       .fetchone()[0] == 0 for table in TABLES)
+            if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise AssertionError("SQLite integrity check failed")
+            if manifest["vectors"] != 0:
+                raise AssertionError("Unexpected vector count in keyword-only backup")
+            if not all(conn.execute(f"SELECT count(*) FROM {table} WHERE embedding_id IS NOT NULL")
+                       .fetchone()[0] == 0 for table in TABLES):
+                raise AssertionError("Missing vector snapshot for an indexed database")
     return manifest
 
 

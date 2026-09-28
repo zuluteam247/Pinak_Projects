@@ -4,16 +4,12 @@ import numpy as np
 from unittest.mock import patch, MagicMock
 from app.services.vector_store import VectorStore
 
-def test_vector_store_initialization_fail_recovery(tmp_path):
+def test_vector_store_initialization_fail_closed(tmp_path):
     index_file = tmp_path / "corrupt.index"
-    index_file.write_text("not a faiss index")
-    
-    # Should log error and create new index instead of crashing
-    with patch("app.services.vector_store.logger") as mock_logger:
-        vs = VectorStore(str(index_file), dimension=128)
-        assert vs.index is not None
-        mock_logger.error.assert_called()
-        assert "Failed to load index" in mock_logger.error.call_args[0][0]
+    index_file.write_text("not an index")
+    with pytest.raises(ValueError, match="manual migration required"):
+        VectorStore(str(index_file), dimension=128)
+    assert index_file.read_text() == "not an index"
 
 def test_vector_store_add_vectors_validation(tmp_path):
     vs = VectorStore(str(tmp_path / "test.index"), dimension=128)

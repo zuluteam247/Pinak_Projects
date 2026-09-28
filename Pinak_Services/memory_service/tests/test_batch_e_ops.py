@@ -87,3 +87,20 @@ def test_keyword_only_backup_without_vector_file(tmp_path):
     backup = create_backup(data, tmp_path / "backups")
     assert verify_backup(backup)["files"].keys() == {"memory.db"}
     assert verify_backup(backup)["vectors"] == 0
+
+
+def test_backup_checks_survive_python_optimized(tmp_path):
+    """A production invocation with -O must not discard parity/checksum checks."""
+    import subprocess
+    import sys
+    data = tmp_path / "data"; data.mkdir()
+    db = DatabaseManager(str(data / "memory.db"))
+    db.add_semantic("indexed", [], "a", "p", 17)
+    index = VectorStore(str(data / "vectors.index.npy"), 2)
+    index.add_vectors(np.array([[1, 2]], dtype=np.float32), [18]); index.save()
+    result = subprocess.run([sys.executable, "-O", "-m", "scripts.backup_verified", "create",
+                             "--data-dir", str(data), "--backup-root", str(tmp_path / "backup")],
+                            capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "Database/vector ID mismatch" in result.stderr
+    assert not list((tmp_path / "backup").iterdir())

@@ -68,13 +68,12 @@ def doctor(fix: bool = False):
         try:
             # This service persists NumPy snapshots, not FAISS indexes.
             from app.services.vector_store import VectorStore
-            with open(vec_path, "rb") as handle:
-                snapshot = np.load(handle, allow_pickle=True).item()
-            vectors = np.asarray(snapshot["vectors"])
+            from app.services.vector_snapshot import read_snapshot
+            vectors, ids = read_snapshot(vec_path)
             if vectors.ndim != 2 or vectors.shape[1] < 1:
                 raise ValueError("Invalid vector snapshot shape")
             index = VectorStore(vec_path, vectors.shape[1])
-            if index.total != len(snapshot["ids"]):
+            if index.total != len(ids):
                 raise ValueError("Invalid vector snapshot IDs")
             typer.echo(f"Vector Index OK (Size: {index.total})")
 

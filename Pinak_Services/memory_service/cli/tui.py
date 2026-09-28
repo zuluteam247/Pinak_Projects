@@ -258,12 +258,13 @@ class DashboardView(Container):
 
         if os.path.exists(vec_path):
             try:
-                index_data = np.load(vec_path, allow_pickle=True)
-                if hasattr(index_data, 'item') and isinstance(index_data.item(), dict):
-                    vec_count = len(index_data.item().get('ids', []))
-                else:
-                    vec_count = index_data.shape[0]
-            except: vec_count = -1
+                from app.services.vector_snapshot import read_snapshot
+                _, ids = read_snapshot(vec_path)
+                vec_count = len(ids)
+            except (ValueError, OSError) as exc:
+                vec_count = "INVALID (check logs)"
+                import logging
+                logging.getLogger(__name__).error("Vector snapshot invalid: %s", exc)
 
         # Access + ingest rates (last 60s)
         if os.path.exists(db_path):

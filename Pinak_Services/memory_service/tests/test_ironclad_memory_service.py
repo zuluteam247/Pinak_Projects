@@ -15,7 +15,8 @@ def test_deterministic_encoder_cycle():
     assert vecs.shape == (1, 64)
     assert not np.all(vecs == 0)
 
-def test_memory_service_init_model_variants():
+def test_memory_service_init_model_variants(tmp_path, monkeypatch):
+    monkeypatch.setenv("PINAK_DATA_ROOT", str(tmp_path / "isolated-models"))
     # Variant 1: model with get_sentence_embedding_dimension
     m1 = MagicMock()
     m1.get_sentence_embedding_dimension.return_value = 128
@@ -24,7 +25,8 @@ def test_memory_service_init_model_variants():
     svc1 = MemoryService(model=m1)
     assert svc1.embedding_dim == 128
     
-    # Variant 2: fallback to 384
+    # Variant 2: fallback to 384, with a separate index dimension.
+    monkeypatch.setenv("PINAK_DATA_ROOT", str(tmp_path / "fallback-model"))
     m2 = MagicMock()
     del m2.embedding_dimension
     del m2.get_sentence_embedding_dimension

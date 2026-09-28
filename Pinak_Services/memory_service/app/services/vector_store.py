@@ -5,6 +5,7 @@ import logging
 import time
 import json
 import tempfile
+from app.services.vector_snapshot import read_snapshot
 from typing import List, Tuple, Optional, Dict, Any
 from contextlib import contextmanager
 
@@ -59,24 +60,14 @@ class VectorStore:
             elif os.path.exists(f"{self.index_path}.npy"):
                 load_path = f"{self.index_path}.npy"
             if load_path:
-                try:
-                    data = np.load(load_path, allow_pickle=True).item()
-                    vectors = np.asarray(data['vectors'], dtype=np.float32)
-                    ids = np.asarray(data['ids'], dtype=np.int64)
-                    if vectors.ndim != 2 or vectors.shape[1] != self.dimension or len(vectors) != len(ids):
-                        raise ValueError("Vector index shape or dimension mismatch")
-                    self.vectors = vectors
-                    self.ids = ids
-                    self._reindex_ids()
-                    self.norms = np.sum(np.square(self.vectors), axis=1)
-                    logger.info(f"Loaded Vector Store from {load_path}. Size: {len(self.ids)}")
-                except Exception as e:
-                    logger.error(f"Failed to load index: {e}. Creating new one.")
-                    self.vectors = np.empty((0, self.dimension), dtype=np.float32)
-                    self.ids = np.array([], dtype=np.int64)
-                    self._id_to_row = {}
-                    self._id_to_rows = {}
-                    self.norms = np.array([], dtype=np.float32)
+                # Do not silently replace damaged or legacy snapshots with an
+                # empty store. That masks loss and can overwrite recoverable bytes.
+                vectors, ids = read_snapshot(load_path, self.dimension)
+                self.vectors = vectors
+                self.ids = ids
+                self._reindex_ids()
+                self.norms = np.sum(np.square(self.vectors), axis=1)
+                logger.info("Loaded Vector Store from %s. Size: %s", load_path, len(self.ids))
 
     def _schedule_save(self):
         """Schedule a debounced save."""
@@ -99,7 +90,8 @@ class VectorStore:
                 fd, temporary = tempfile.mkstemp(prefix=".vectors-", dir=dirpath or ".")
                 try:
                     with os.fdopen(fd, "wb") as handle:
-                        np.save(handle, {'vectors': self.vectors, 'ids': self.ids})
+                        np.savez(handle, format_version=np.array(1, dtype=np.int64),
+                                 vectors=self.vectors, ids=self.ids)
                         handle.flush()
                         os.fsync(handle.fileno())
                     os.replace(temporary, self.index_path)
