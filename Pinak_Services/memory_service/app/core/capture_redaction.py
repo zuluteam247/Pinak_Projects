@@ -329,6 +329,18 @@ def _category_for_key(key: Any) -> str:
     return ""
 
 
+def _unique_key(out: Dict[str, Any], candidate: str) -> str:
+    """Keep two keys that redact to the same placeholder distinct.
+
+    Collapsing them would silently drop a branch of the payload, which is a
+    quieter bug than the leak it was meant to fix.
+    """
+
+    if candidate not in out:
+        return candidate
+    return f"{candidate}.{len(out)}"
+
+
 def _redact_string_value(value: str) -> Tuple[str, Dict[str, int]]:
     """Replace secret-shaped substrings inside a string.
 
@@ -361,8 +373,7 @@ def _merge(into: Dict[str, int], more: Dict[str, int]) -> None:
         into[category] = into.get(category, 0) + count
 
 
-def _redact(value: Any, counts: Dict[str, int], depth: int = 0,
-            forced_category: str = "") -> Any:
+def _redact(value: Any, counts: Dict[str, int], depth: int = 0) -> Any:
     """Walk the payload and redact, recursively, to MAX_PAYLOAD_DEPTH.
 
     The depth limit is the 1a walker's, reused deliberately: a payload that
@@ -382,34 +393,34 @@ def _redact(value: Any, counts: Dict[str, int], depth: int = 0,
     if isinstance(value, dict):
         out: Dict[str, Any] = {}
         for key, item in value.items():
-            category = forced_category or _category_for_key(key)
-            # The KEY is payload content too. A caller that writes
-            # {"AKIA...": "see attached"} has put the secret in the field name,
-            # and redacting only values leaves it in the canonical bytes and
-            # therefore in the hash. So the key goes through the same value-shape
-            # pass before it is written back.
+            category = _category_for_key(key)
+            if category:
+                # A key-name hit takes the key AND everything under it, as ONE
+                # placeholder. Walking into the subtree and masking leaf by leaf
+                # leaves the structure, the sibling key names and the shape of
+                # what was there sitting in the canonical bytes, and the
+                # secret-bearing key name itself survives into the hash. So the
+                # whole entry collapses here and we do not recurse.
+                placeholder = REDACTION_PLACEHOLDERS[category]
+                _merge(counts, {category: 1})
+                out[_unique_key(out, placeholder)] = placeholder
+                continue
+
+            # The KEY is payload content too, even when its name is innocuous:
+            # {"AKIA...": "see attached"} puts the secret in the field name, and
+            # redacting only values leaves it in the canonical bytes and so in
+            # the hash. Keys go through the same value-shape pass.
             safe_key = key
             if isinstance(key, str):
-                safe_key, key_hits = _redact_string_value(key)
+                cleaned_key, key_hits = _redact_string_value(key)
                 _merge(counts, key_hits)
-                if safe_key != key and safe_key in out:
-                    # Two distinct keys redacted down to the same placeholder.
-                    # Collapsing them would silently drop a branch, so the later
-                    # one is suffixed by position rather than lost.
-                    safe_key = f"{safe_key}.{len(out)}"
-            out[safe_key] = _redact(item, counts, depth + 1, category)
+                safe_key = (_unique_key(out, cleaned_key)
+                            if cleaned_key != key else cleaned_key)
+            out[safe_key] = _redact(item, counts, depth + 1)
         return out
 
     if isinstance(value, (list, tuple)):
-        return [_redact(item, counts, depth + 1, forced_category) for item in value]
-
-    if forced_category:
-        # The key named this a secret, so the whole value goes, whatever shape
-        # it has. A number or a bool under "password" is still a password.
-        if value is None:
-            return None
-        _merge(counts, {forced_category: 1})
-        return REDACTION_PLACEHOLDERS[forced_category]
+        return [_redact(item, counts, depth + 1) for item in value]
 
     if isinstance(value, str):
         cleaned, hits = _redact_string_value(value)

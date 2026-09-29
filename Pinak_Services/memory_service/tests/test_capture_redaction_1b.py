@@ -147,11 +147,12 @@ def test_key_name_redacts_non_string_values_too():
     assert result.privacy_class == "restricted"
 
 
-def test_null_under_a_secret_key_stays_null():
+def test_null_under_a_secret_key_is_still_collapsed():
+    # The key name is the hit, so the entry goes whatever the value holds. An
+    # exception for null would leave "password" itself sitting in the bytes.
     result = redact_and_classify({"password": None})
-    assert result.payload == {"password": None}
-    assert result.report.redaction_count == 0
-    assert result.privacy_class == "internal"
+    assert "password" not in json.dumps(result.payload)
+    assert result.privacy_class == "restricted"
 
 
 def test_ordinary_keys_are_left_alone():
@@ -214,10 +215,12 @@ def test_pem_private_key_block_is_redacted():
 
 
 def test_placeholder_does_not_leak_the_length_of_what_it_replaced():
+    # A length-preserving mask tells you how long the secret was.
     short = redact_and_classify({"password": "a"})
     long = redact_and_classify({"password": "a" * 512})
-    assert short.payload["password"] == long.payload["password"]
-    assert short.payload["password"] in REDACTION_PLACEHOLDERS.values()
+    assert short.payload == long.payload
+    assert short.canonical_bytes == long.canonical_bytes
+    assert list(short.payload.values())[0] in REDACTION_PLACEHOLDERS.values()
 
 
 # --- Recursion: depth, arrays, and the 1a walker's limit --------------------
@@ -251,13 +254,15 @@ def test_a_payload_too_deep_to_walk_is_rejected_not_partially_redacted():
     assert excinfo.value.code == "payload_too_deep"
 
 
-def test_key_forced_category_applies_to_everything_under_it():
-    # A whole credentials object, not just its leaves, is a secret.
+def test_key_name_hit_collapses_the_whole_subtree_to_one_placeholder():
+    # Not leaf by leaf: masking leaves behind the structure, the sibling key
+    # names and the shape of what was there, all of it in the canonical bytes.
     result = redact_and_classify(
         {"credentials": {"user": "root", "pass": "toor", "hosts": ["a", "b"]}})
     dumped = json.dumps(result.payload)
-    for leaked in ("root", "toor", '"a"', '"b"'):
+    for leaked in ("root", "toor", "hosts", "user", "credentials"):
         assert leaked not in dumped
+    assert result.report.redaction_count == 1
 
 
 # --- CW 5.5 / CW 6.4: nothing caller-supplied comes back out ----------------
@@ -410,3 +415,44 @@ def test_two_keys_redacting_to_the_same_placeholder_keep_both_branches():
 def test_ordinary_keys_are_not_rewritten():
     result = redact_and_classify({"event_type": "message", "sequence": 4})
     assert set(result.payload) == {"event_type", "sequence"}
+
+
+# --- Round 3: zulu's probes, verbatim ---------------------------------------
+
+def test_probe_one_ssn_payload():
+    result = redact_and_classify({"ssn": "123-45-6789"})
+    assert "123-45-6789" not in json.dumps(result.payload)
+    assert result.privacy_class == "confidential"
+
+
+def test_probe_two_secret_bearing_key_name():
+    result = redact_and_classify({"my_password_is_canarySECRET": "ordinary"})
+    dumped = json.dumps(result.payload)
+    assert "canarySECRET" not in dumped
+    assert "my_password_is" not in dumped
+    assert b"canarySECRET" not in result.canonical_bytes
+    assert result.privacy_class == "restricted"
+
+
+def test_nested_subtree_under_a_secret_key_leaves_no_structure():
+    result = redact_and_classify(
+        {"authorization": {"token": {"value": "x", "issued": "2026-09-29"},
+                           "scopes": ["memory.read", "memory.write"]}})
+    dumped = json.dumps(result.payload)
+    for leaked in ("issued", "scopes", "memory.read", "2026-09-29", "token"):
+        assert leaked not in dumped
+    assert result.report.redaction_count == 1
+
+
+def test_an_innocuous_key_still_recurses_into_its_subtree():
+    # "context" names no secret, so the walk continues and the secret key
+    # inside it is the thing that collapses, not the whole branch.
+    result = redact_and_classify(
+        {"context": {"api_key": "x", "step": "retry"}})
+    assert result.payload["context"]["step"] == "retry"
+    assert "x" not in json.dumps(result.payload["context"])
+
+
+def test_sibling_of_a_redacted_key_is_untouched():
+    result = redact_and_classify({"password": "x", "event_type": "message"})
+    assert result.payload["event_type"] == "message"
