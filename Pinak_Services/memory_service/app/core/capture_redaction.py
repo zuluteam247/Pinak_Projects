@@ -64,10 +64,10 @@ RETENTION_CLASSES: Tuple[str, ...] = (
 #   - A raw staged event is task, with a 30-day TTL, unless it is promoted or
 #     attached to an open task.
 #   - legal_hold is set only on explicit owner action.
-# public and confidential are members of the enum, but the amendment states no
-# rule that assigns either automatically. 1b therefore never assigns them: a
-# classifier that invented a rule for them would be claiming a policy nobody
-# ratified. When the owner settles one, it lands here.
+#   - Unrelated personal data is confidential, and is redacted.
+# public is a member of the enum with no rule assigning it, so 1b never assigns
+# it: a classifier that invented a rule for it would be claiming a policy
+# nobody ratified. When the owner settles one, it lands here.
 DEFAULT_PRIVACY_CLASS = "internal"
 SECRET_PRIVACY_CLASS = "restricted"
 RAW_STAGED_RETENTION_CLASS = "task"
@@ -445,14 +445,12 @@ def _redact(value: Any, counts: Dict[str, int], depth: int = 0) -> Any:
 def assign_privacy_class(report: RedactionReport) -> str:
     """CW 4.5: a secret or credential match is restricted; ordinary work is internal.
 
-    Personal data sits between the two and is classified confidential. The
-    amendment settles confidential as a member of the enum but states no rule
-    that assigns it, so this rule is NOT the amendment's: it comes from the 1b
-    verification round, where direct personal identifiers were found surviving
-    a redaction pass that only looked for secrets. It is recorded here as an
-    implementation decision awaiting owner ratification, and it is one line to
-    change if the owner wants personal data classified differently. Precedence
-    is strict: a payload carrying both a secret and personal data is restricted.
+    Personal data sits between the two and is classified confidential. That is
+    the amendment's own rule, which requires unrelated personal data to be
+    redacted and classified confidential; an earlier version of this comment
+    said the amendment assigned no rule for confidential, which was wrong.
+    Precedence is strict: a payload carrying both a secret and personal data is
+    restricted.
     """
 
     if report.found_secret:
