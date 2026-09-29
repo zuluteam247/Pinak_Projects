@@ -12,6 +12,11 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "numpy>=1.26",
     "PyJWT>=2.8",
+    # RFC 8785 (JCS) canonical serialization. Vetted implementation rather
+    # than a hand-rolled one: the canonical bytes counted against the size
+    # ceiling in 1a are the same bytes hashed in 1b, so number formatting and
+    # UTF-16 member ordering have to match the reference exactly.
+    "rfc8785>=0.1.2",
     "jsonschema>=4.22.0",
     "textual>=0.47.1",
     "typer>=0.9.0",

@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import math
 import re
+import rfc8785
+
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -196,85 +198,35 @@ class ValidatedEnvelope:
     fields: Dict[str, Any] = field(default_factory=dict)
 
 
-def _js_number(value: Any) -> str:
-    """Serialize a number the way RFC 8785 requires (ECMAScript Number::toString).
+def _ecmascript_number(value: Any) -> Any:
+    """Coerce a parsed JSON number into the ECMAScript number domain.
 
-    Integers print without a decimal point, -0 prints as 0, and floats use the
-    shortest round-tripping representation. NaN and the infinities are not
-    serializable and are rejected upstream.
+    RFC 8785 canonicalizes numbers as IEEE-754 doubles, because that is what a
+    JSON value is once ECMAScript has parsed it. Python's json keeps arbitrary
+    precision integers, so 9007199254740993 survives here where JSON.parse
+    would already have rounded it to 9007199254740992. Rounding at the edge of
+    the canonicalizer keeps our bytes identical to the reference output instead
+    of preserving digits no conforming implementation can see.
     """
 
-    if isinstance(value, int):
-        return str(value)
-    if not math.isfinite(value):
-        raise ValueError("non-finite numbers are not canonically serializable")
-    if value == 0:
-        # RFC 8785: -0 and 0 share one canonical form.
-        return "0"
-    if value == int(value) and abs(value) < 1e21:
-        return str(int(value))
-    text = repr(float(value))
-    if "e" in text or "E" in text:
-        mantissa, _, exponent = text.partition("e")
-        exp_value = int(exponent)
-        mantissa = mantissa.rstrip("0").rstrip(".") if "." in mantissa else mantissa
-        sign = "+" if exp_value >= 0 else "-"
-        text = f"{mantissa}e{sign}{abs(exp_value)}"
-    return text
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and abs(value) > _MAX_SAFE_INTEGER:
+        as_double = float(value)
+        if not math.isfinite(as_double):
+            raise ValueError("integer is outside the IEEE-754 double range")
+        return as_double
+    return value
 
 
-_ESCAPES = {
-    '"': '\\"',
-    "\\": "\\\\",
-    "\b": "\\b",
-    "\f": "\\f",
-    "\n": "\\n",
-    "\r": "\\r",
-    "\t": "\\t",
-}
+def _to_ecmascript_domain(value: Any) -> Any:
+    """Apply the number coercion above through the whole structure."""
 
-
-def _js_string(value: str) -> str:
-    out = ['"']
-    for char in value:
-        escape = _ESCAPES.get(char)
-        if escape is not None:
-            out.append(escape)
-        elif ord(char) < 0x20:
-            out.append(f"\\u{ord(char):04x}")
-        else:
-            out.append(char)
-    out.append('"')
-    return "".join(out)
-
-
-def _sort_key(key: str) -> List[int]:
-    """RFC 8785 sorts member names by UTF-16 code unit, not by code point."""
-
-    return [unit for unit in key.encode("utf-16-be")]
-
-
-def _canonicalize(value: Any) -> str:
-    if value is None:
-        return "null"
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    if isinstance(value, (int, float)):
-        return _js_number(value)
-    if isinstance(value, str):
-        return _js_string(value)
-    if isinstance(value, (list, tuple)):
-        return "[" + ",".join(_canonicalize(item) for item in value) + "]"
     if isinstance(value, dict):
-        members = []
-        for key in sorted(value, key=_sort_key):
-            if not isinstance(key, str):
-                raise ValueError("object keys must be strings")
-            members.append(f"{_js_string(key)}:{_canonicalize(value[key])}")
-        return "{" + ",".join(members) + "}"
-    raise TypeError(f"{type(value).__name__} is not canonically serializable")
+        return {key: _to_ecmascript_domain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_ecmascript_domain(item) for item in value]
+    return _ecmascript_number(value)
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -283,12 +235,23 @@ def canonical_json_bytes(value: Any) -> bytes:
     Owner ruling 2 puts JCS plus SHA-256 on the redacted payload; that hashing
     lands in 1b. 1a uses the same canonical form to count the bytes of the
     complete envelope, so the count and the later hash agree on one
-    serialization rather than two. json.dumps(sort_keys=True) is NOT JCS: it
-    sorts by code point, prints 1.0 as "1.0" and -0.0 as "-0.0", and would
-    make the ceiling count disagree with the hash input.
+    serialization rather than two.
+
+    The serializer is the vetted `rfc8785` implementation, not a hand-rolled
+    one. A previous hand-rolled pass here got two number cases wrong: it
+    printed 1e-06 where ECMAScript prints 0.000001, and it preserved integers
+    past 2**53 that ECMAScript rounds. Either one makes the canonical size and
+    the 1b hash input disagree with every conforming implementation, which is
+    exactly the divergence the canonical form exists to prevent.
+
+    json.dumps(sort_keys=True) is NOT JCS either: it sorts by code point
+    rather than UTF-16 code unit, prints 1.0 as "1.0" and -0.0 as "-0.0".
     """
 
-    return _canonicalize(value).encode("utf-8")
+    try:
+        return rfc8785.dumps(_to_ecmascript_domain(value))
+    except rfc8785.CanonicalizationError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _reject(status_code: int, code: str, message: str, **extra: Any) -> None:
@@ -340,9 +303,12 @@ def _scan_hidden_reasoning(value: Any, depth: int = 0) -> None:
             if isinstance(key, str) and key.strip().lower() in FORBIDDEN_PAYLOAD_KEYS
         )
         if forbidden:
+            # CW 5.5: the count travels, the names do not. A rejected key name
+            # is attacker-supplied content and can itself be sensitive, so it
+            # is never echoed back in the error body.
             _reject(422, "schema_violation",
                     "Hidden reasoning is not an envelope field",
-                    field="payload", forbidden_keys=forbidden)
+                    field="payload", forbidden_key_count=len(forbidden))
         for item in value.values():
             _scan_hidden_reasoning(item, depth + 1)
     elif isinstance(value, (list, tuple)):
@@ -388,10 +354,12 @@ def _check_schema(body: Dict[str, Any]) -> str:
         _reject(422, "schema_violation", "Required envelope fields are missing",
                 missing_fields=sorted(missing))
 
-    unknown = sorted(set(body) - set(REQUIRED_FIELDS))
+    unknown = set(body) - set(REQUIRED_FIELDS)
     if unknown:
+        # CW 5.5: unknown field names come from the caller. Report how many
+        # there were, never what they were called.
         _reject(422, "schema_violation", "Unknown envelope fields",
-                unknown_fields=unknown)
+                unknown_field_count=len(unknown))
 
     for field_name in ("tenant_id", "agent_id", "client_id", "client_version"):
         value = body[field_name]
@@ -451,7 +419,7 @@ def _check_schema(body: Dict[str, Any]) -> str:
         # trust. Rejected, not silently downgraded.
         _reject(422, "client_assigned_service_field",
                 "provenance may not assert service-authoritative values",
-                field="provenance", forbidden_keys=asserted)
+                field="provenance", forbidden_key_count=len(asserted))
     _scan_hidden_reasoning(provenance)
 
     return task_binding

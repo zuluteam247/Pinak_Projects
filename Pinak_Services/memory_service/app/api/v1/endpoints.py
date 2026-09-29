@@ -129,12 +129,14 @@ def open_capture_session(
                 "code": "schema_violation",
                 "message": "Session open body must be a JSON object",
             })
-        unknown = sorted(set(body) - {"client_session_ref", "client_version"})
+        unknown = set(body) - {"client_session_ref", "client_version"}
         if unknown:
+            # CW 5.5: caller-supplied field names are payload content and are
+            # never echoed back. The count is enough to debug against.
             raise HTTPException(status_code=422, detail={
                 "code": "schema_violation",
                 "message": "Unknown session open fields",
-                "unknown_fields": unknown,
+                "unknown_field_count": len(unknown),
             })
         ref = body.get("client_session_ref")
         if ref is not None and (not isinstance(ref, str) or not ref or len(ref) > 256):

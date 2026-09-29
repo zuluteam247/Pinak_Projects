@@ -148,7 +148,10 @@ def test_missing_required_field_is_422_schema_violation():
 def test_unknown_field_is_rejected_not_ignored():
     rejection = _reject(_envelope(extra_field="nope"))
     assert rejection.status_code == 422
-    assert rejection.extra["unknown_fields"] == ["extra_field"]
+    # CW 5.5: the count comes back, the caller's field name does not.
+    assert rejection.extra["unknown_field_count"] == 1
+    assert "extra_field" not in str(rejection.extra)
+    assert "extra_field" not in rejection.message
 
 
 @pytest.mark.parametrize("field_name",
@@ -265,7 +268,8 @@ def test_provenance_may_not_assert_service_authoritative_values(key):
     rejection = _reject(_envelope(provenance={"captured_by": "cli", key: "x"}))
     assert rejection.status_code == 422
     assert rejection.code == "client_assigned_service_field"
-    assert key in rejection.extra["forbidden_keys"]
+    assert rejection.extra["forbidden_key_count"] == 1
+    assert key not in str(rejection.extra)
 
 
 def test_provenance_must_be_a_non_empty_object():
@@ -279,7 +283,8 @@ def test_provenance_must_be_a_non_empty_object():
 def test_hidden_reasoning_is_not_an_envelope_field():
     rejection = _reject(_envelope(payload={"text": "hi", "hidden_reasoning": "x"}))
     assert rejection.status_code == 422
-    assert rejection.extra["forbidden_keys"] == ["hidden_reasoning"]
+    assert rejection.extra["forbidden_key_count"] == 1
+    assert "hidden_reasoning" not in str(rejection.extra)
 
 
 @pytest.mark.parametrize("payload", [
@@ -396,3 +401,78 @@ def test_validation_does_not_mutate_the_caller_envelope():
     snapshot = copy.deepcopy(envelope)
     validate_capture_envelope(envelope, CLAIM)
     assert envelope == snapshot
+
+
+# --- RFC 8785 conformance (repair A) ---------------------------------------
+
+
+@pytest.mark.parametrize("value,expected", [
+    # The two vectors the second review caught: exponent form for small
+    # magnitudes, and integers past the safe range.
+    ({"a": 0.000001}, b'{"a":0.000001}'),
+    ({"a": 9007199254740993}, b'{"a":9007199254740992}'),
+    # ECMAScript Number::toString boundaries either side of the exponent
+    # switch, from the RFC 8785 appendix B discussion.
+    ({"a": 1e-7}, b'{"a":1e-7}'),
+    ({"a": 1e21}, b'{"a":1e+21}'),
+    ({"a": 1e20}, b'{"a":100000000000000000000}'),
+    ({"a": -0.0}, b'{"a":0}'),
+    ({"a": 1.0}, b'{"a":1}'),
+    ({"a": 333333333.33333329}, b'{"a":333333333.3333333}'),
+    ({"a": 5e-324}, b'{"a":5e-324}'),
+    ({"a": 1.7976931348623157e308}, b'{"a":1.7976931348623157e+308}'),
+])
+def test_canonical_numbers_match_ecmascript(value, expected):
+    assert canonical_json_bytes(value) == expected
+
+
+def test_canonical_member_order_is_utf16_code_unit():
+    # A non-BMP key sorts after "b" by UTF-16 code unit and before it by code
+    # point, so this ordering is the whole difference between JCS and
+    # json.dumps(sort_keys=True).
+    ordered = canonical_json_bytes({"\U0001f600": 3, "b": 4, "\u00e4": 1, "\u00c4": 2})
+    assert ordered == '{"b":4,"\u00c4":2,"\u00e4":1,"\U0001f600":3}'.encode("utf-8")
+
+
+def test_canonical_form_is_not_json_dumps_sort_keys():
+    import json
+
+    value = {"a": 1.0, "b": -0.0, "\U0001f600": 1, "z": 1}
+    assert canonical_json_bytes(value) != json.dumps(
+        value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def test_size_ceiling_counts_canonical_bytes_at_the_boundary():
+    # Build an envelope whose canonical form lands exactly on the ceiling,
+    # then one byte over. The ceiling is a canonical-byte boundary, so the
+    # last accepted envelope and the first rejected one differ by one byte of
+    # the same serialization 1b will hash.
+    base = _envelope(payload={"text": ""})
+    overhead = len(canonical_json_bytes(base))
+    filler = "x" * (MAX_ENVELOPE_BYTES - overhead)
+    exact = _envelope(payload={"text": filler})
+    assert len(canonical_json_bytes(exact)) == MAX_ENVELOPE_BYTES
+    validated = validate_capture_envelope(exact, CLAIM)
+    assert validated.canonical_bytes == MAX_ENVELOPE_BYTES
+
+    over = _envelope(payload={"text": filler + "x"})
+    assert len(canonical_json_bytes(over)) == MAX_ENVELOPE_BYTES + 1
+    rejection = _reject(over)
+    assert rejection.status_code == 422
+    assert rejection.code == "event_too_large"
+    assert rejection.extra["max_bytes"] == MAX_ENVELOPE_BYTES
+
+
+def test_error_bodies_never_echo_caller_supplied_names():
+    # One assertion over every rejection path that sees caller-controlled key
+    # names: the secret-looking name must not survive into the error body.
+    secret = "patient_ssn_1234"
+    for envelope in (
+        _envelope(**{secret: "x"}),
+        _envelope(payload={"text": "hi", "hidden_reasoning": "x", secret: "y"}),
+        _envelope(provenance={"captured_by": "cli", "trust": "x", secret: "y"}),
+    ):
+        rejection = _reject(envelope)
+        assert rejection.status_code == 422
+        rendered = str(rejection.as_detail())
+        assert secret not in rendered
