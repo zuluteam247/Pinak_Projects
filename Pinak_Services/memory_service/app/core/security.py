@@ -25,6 +25,12 @@ class AuthContext:
     child_client_id: Optional[str]
     effective_client_id: str
     token: str
+    # Signed claims only (CW 2.2). These are never populated from a header and
+    # never defaulted to "unknown": a caller that needs a bound identity reads
+    # these, not effective_client_id, which deliberately falls back to headers
+    # and sub for legacy provenance labelling.
+    signed_agent_id: Optional[str] = None
+    signed_client_id: Optional[str] = None
 
 
 _http_bearer = HTTPBearer(auto_error=False)
@@ -120,6 +126,10 @@ def require_auth_context(
     parent_client_id = parent_client_id_header or payload.get("parent_client_id") or payload.get("parent_client")
     effective_client_id = resolved_child_id or client_id or payload.get("sub") or "unknown"
 
+    # Signed identity, taken from the token and nothing else.
+    signed_agent_id = payload.get("agent_id") or payload.get("agent")
+    signed_client_id = payload.get("client_id") or payload.get("cid")
+
     return AuthContext(
         subject=payload.get("sub"),
         tenant_id=str(tenant),
@@ -132,6 +142,8 @@ def require_auth_context(
         child_client_id=resolved_child_id,
         effective_client_id=effective_client_id,
         token=token,
+        signed_agent_id=str(signed_agent_id) if signed_agent_id else None,
+        signed_client_id=str(signed_client_id) if signed_client_id else None,
     )
 
 

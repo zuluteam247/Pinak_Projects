@@ -11,7 +11,9 @@ from app.core.schemas import (
     ClientIssueCreate, ClientIssueRead, ClientRegisterCreate, ClientRegisterRead
 )
 from app.core.security import AuthContext, require_auth_context, require_scope, require_role
-from app.core.capture_envelope import CaptureRejection, validate_capture_envelope
+from app.core.capture_envelope import (
+    CaptureRejection, IdentityClaim, validate_capture_envelope,
+)
 from app.core.schema_registry import SchemaRegistry
 from app.services.memory_service import MemoryService
 
@@ -64,6 +66,97 @@ def list_schemas(
 # /v1/capture. A later move to /v1/capture is a rename with a redirect once the
 # pipeline is real. The written rationale is docs/adr-0002-capture-route.md.
 
+
+def _capture_identity_claim(ctx: AuthContext) -> IdentityClaim:
+    """Build the bound identity from signed claims only (CW 2.2).
+
+    There is no fallback here on purpose. effective_client_id exists for
+    provenance labelling and falls back to a header, sub, then the literal
+    "unknown"; binding a capture envelope to any of those would let an
+    unsigned header decide who wrote an event. A token with no agent or no
+    client claim is refused with 403, and the operator registers the claim.
+    """
+
+    missing = []
+    if not ctx.signed_agent_id:
+        missing.append("agent_id")
+    if not ctx.signed_client_id:
+        missing.append("client_id")
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "auth_claim_missing",
+                "message": ("The access token carries no signed "
+                            + " and no signed ".join(missing)
+                            + " claim; capture identity cannot be bound."),
+                "missing_claims": missing,
+            },
+        )
+    return IdentityClaim(
+        tenant_id=ctx.tenant_id,
+        agent_id=ctx.signed_agent_id,
+        client_id=ctx.signed_client_id,
+    )
+
+
+@router.post("/capture/session")
+def open_capture_session(
+    body: Any = Body(default=None),
+    ctx: AuthContext = Depends(require_auth_context),
+):
+    """Session open (CW 3.1, PRD v3 §2), inert under the phase gate.
+
+    The contract: the service mints a ULID session id at open, the client
+    echoes it on every later event, and an optional client_session_ref is a
+    stability alias, unique per tenant+client, never authority and never a
+    bootstrap token. Absent a ref, the session is marked
+    session_identity_source=inferred and is never auto-joined.
+
+    Minting is a write (a session row, and an alias row when a ref is given),
+    and CW 7.4 puts zero writes behind the joint 1b+1c gate, session mint and
+    alias explicitly included. So this route validates the request and then
+    refuses with the same 503 as capture: it never mints an id it would have
+    to persist. The mint itself lands with 1c, not here.
+    """
+
+    require_scope(ctx, "memory.write")
+    _capture_identity_claim(ctx)
+
+    if body is not None:
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=422, detail={
+                "code": "schema_violation",
+                "message": "Session open body must be a JSON object",
+            })
+        unknown = sorted(set(body) - {"client_session_ref", "client_version"})
+        if unknown:
+            raise HTTPException(status_code=422, detail={
+                "code": "schema_violation",
+                "message": "Unknown session open fields",
+                "unknown_fields": unknown,
+            })
+        ref = body.get("client_session_ref")
+        if ref is not None and (not isinstance(ref, str) or not ref or len(ref) > 256):
+            raise HTTPException(status_code=422, detail={
+                "code": "schema_violation",
+                "message": "client_session_ref must be a non-empty string when present",
+                "field": "client_session_ref",
+            })
+
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "code": "capture_disabled",
+            "message": (
+                "Session mint is validated but disabled until server-side "
+                "redaction (1b) and recall-blind staging with TTL (1c) pass "
+                "the joint gate. No session id or alias is minted or stored."
+            ),
+        },
+    )
+
+
 @router.post("/capture")
 def capture_event(
     body: Any = Body(...),
@@ -78,11 +171,7 @@ def capture_event(
     """
 
     require_scope(ctx, "memory.write")
-    claim = {
-        "tenant_id": ctx.tenant_id,
-        "agent_id": ctx.subject,
-        "client_id": ctx.effective_client_id,
-    }
+    claim = _capture_identity_claim(ctx)
     try:
         validate_capture_envelope(body, claim)
     except CaptureRejection as rejection:
