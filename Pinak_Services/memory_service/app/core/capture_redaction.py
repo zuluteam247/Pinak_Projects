@@ -210,16 +210,29 @@ _VALUE_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
     # and neither the group nor the serial may be all zeroes, so a placeholder
     # like 000-00-0000 in a fixture is left alone.
     (re.compile(r"\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b"), CATEGORY_PII),
-    # India Aadhaar: twelve digits, conventionally spaced in fours. The issuing
-    # range never starts 0 or 1, but a redactor that trusts that leaks anything
-    # mistyped or test-shaped, so any twelve-digit run in this grouping goes.
-    # Over-redacting a bare twelve-digit id is the cheap direction of the error.
-    (re.compile(r"\b\d{4}[ -]?\d{4}[ -]?\d{4}\b"), CATEGORY_PII),
     # India PAN.
     (re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b"), CATEGORY_PII),
     # Email address.
     (re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"), CATEGORY_PII),
 )
+
+# India Aadhaar is matched separately, under owner ruling B (30 Sep 2026): a
+# twelve-digit run is redacted only when Aadhaar-like context sits near it.
+# Masking every bare twelve-digit run would also hide ordinary order and
+# reference numbers, which the frozen classification rule calls internal, so
+# the context requirement is the recorded policy rather than a shape guess.
+_AADHAAR_CANDIDATE = re.compile(r"\b\d{4}[ -]?\d{4}[ -]?\d{4}\b")
+_AADHAAR_CONTEXT = re.compile(r"aadhaar|aadhar|\u0906\u0927\u093e\u0930|uidai|\buid\b", re.IGNORECASE)
+# How far either side of the digits the context word may sit.
+_AADHAAR_CONTEXT_BEFORE = 64
+_AADHAAR_CONTEXT_AFTER = 32
+
+
+def _aadhaar_context_near(text: str, start: int, end: int) -> bool:
+    window = text[max(0, start - _AADHAAR_CONTEXT_BEFORE):start]
+    window += text[end:end + _AADHAAR_CONTEXT_AFTER]
+    return bool(_AADHAAR_CONTEXT.search(window))
+
 
 # Payment cards are matched separately. The shape alone, thirteen to nineteen
 # digits, hits ordinary long numbers constantly, so a candidate is only redacted
@@ -366,6 +379,17 @@ def _redact_string_value(value: str) -> Tuple[str, Dict[str, int]]:
     # digit-group patterns, a sixteen-digit card loses its leading twelve to the
     # Aadhaar shape and the last four survive into the canonical bytes.
     cleaned = _CARD_CANDIDATE.sub(_card, cleaned)
+
+    def _aadhaar(match: "re.Match") -> str:
+        if not _aadhaar_context_near(cleaned, match.start(), match.end()):
+            return match.group(0)
+        counts[CATEGORY_PII] = counts.get(CATEGORY_PII, 0) + 1
+        return REDACTION_PLACEHOLDERS[CATEGORY_PII]
+
+    # Aadhaar, context-gated per owner ruling B. Runs before the remaining
+    # value patterns so a matched Aadhaar is already a placeholder, and after
+    # cards so a card keeps its whole span.
+    cleaned = _AADHAAR_CANDIDATE.sub(_aadhaar, cleaned)
 
     for pattern, category in _VALUE_PATTERNS:
         placeholder = REDACTION_PLACEHOLDERS[category]

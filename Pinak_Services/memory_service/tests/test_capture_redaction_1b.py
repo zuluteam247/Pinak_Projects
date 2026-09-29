@@ -463,6 +463,8 @@ def test_sibling_of_a_redacted_key_is_untouched():
 # Strings below are shape examples, not credentials.
 
 def test_vector_free_text_aadhaar():
+    # Zulu's round-two vector, kept with its Aadhaar context. Under owner
+    # ruling B the context is what makes it PII, not the twelve-digit shape.
     result = redact_and_classify({"note": "aadhaar is 1234 5678 9012 ok"})
     assert "1234 5678 9012" not in json.dumps(result.payload)
     assert b"5678" not in result.canonical_bytes
@@ -498,11 +500,53 @@ def test_compact_iban_still_matches():
     assert "WEST" not in json.dumps(result.payload)
 
 
-def test_a_twelve_digit_id_is_redacted_rather_than_risked():
-    # Deliberate over-redaction: the grouping is indistinguishable from an
-    # Aadhaar, and leaking one is worse than masking an id.
+# --- Owner ruling B (30 Sep 2026): Aadhaar context, not bare shape ---------
+
+def test_bare_twelve_digit_reference_stays_internal():
+    # Ruling B: an ordinary order or reference number is internal and is not
+    # masked. Only Aadhaar-like context turns a twelve-digit run into PII.
     result = redact_and_classify({"note": "ref 100000000001"})
-    assert "100000000001" not in json.dumps(result.payload)
+    assert "100000000001" in json.dumps(result.payload)
+    assert result.privacy_class == "internal"
+
+
+def test_bare_spaced_twelve_digit_order_number_stays_internal():
+    result = redact_and_classify({"note": "order 1234 5678 9012 shipped"})
+    assert "1234 5678 9012" in json.dumps(result.payload)
+    assert result.privacy_class == "internal"
+
+
+def test_aadhaar_context_before_the_digits_masks_them():
+    result = redact_and_classify({"note": "aadhaar 1234 5678 9012"})
+    assert "1234 5678 9012" not in json.dumps(result.payload)
+    assert b"5678" not in result.canonical_bytes
+    assert result.privacy_class == "confidential"
+
+
+def test_aadhaar_context_after_the_digits_masks_them():
+    result = redact_and_classify({"note": "1234 5678 9012 is his aadhaar"})
+    assert "1234 5678 9012" not in json.dumps(result.payload)
+    assert result.privacy_class == "confidential"
+
+
+def test_uidai_and_devanagari_context_also_count():
+    result = redact_and_classify({"note": "UIDAI record 123456789012"})
+    assert "123456789012" not in json.dumps(result.payload)
+    hindi = redact_and_classify({"note": "\u0906\u0927\u093e\u0930 1234 5678 9012"})
+    assert "1234 5678 9012" not in json.dumps(hindi.payload)
+
+
+def test_aadhaar_key_name_still_collapses_regardless_of_context():
+    result = redact_and_classify({"aadhaar": "1234 5678 9012"})
+    assert "1234 5678 9012" not in json.dumps(result.payload)
+    assert b"5678" not in result.canonical_bytes
+
+
+def test_distant_aadhaar_word_does_not_reach_an_unrelated_number():
+    text = ("aadhaar guidance was published by the authority last year and the "
+            "team reviewed it again before filing, order 1234 5678 9012")
+    result = redact_and_classify({"note": text})
+    assert "1234 5678 9012" in json.dumps(result.payload)
 
 
 def test_short_digit_runs_are_left_alone():
