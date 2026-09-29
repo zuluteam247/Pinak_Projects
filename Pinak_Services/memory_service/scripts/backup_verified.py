@@ -87,15 +87,32 @@ def create_backup(data_dir, backup_root):
 
 def verify_backup(directory):
     directory = Path(directory)
-    manifest = json.loads((directory / "manifest.json").read_text())
-    for name in manifest["files"]:
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError("Backup directory must be a real directory")
+    manifest_path = directory / "manifest.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("Backup manifest must be a regular file")
+    manifest = json.loads(manifest_path.read_text())
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), dict):
+        raise AssertionError("Invalid backup manifest")
+    names = set(manifest["files"])
+    if names not in ({"memory.db"}, {"memory.db", "vectors.index.npy"}):
+        raise AssertionError("Invalid backup manifest file set")
+    if not isinstance(manifest.get("vectors"), int) or manifest["vectors"] < 0:
+        raise AssertionError("Invalid backup vector count")
+    for name in names:
+        expected = manifest["files"][name]
+        if not isinstance(expected, str) or len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+            raise AssertionError("Invalid backup digest")
+        item = directory / name
+        if item.is_symlink() or not item.is_file():
+            raise AssertionError("Backup member must be a regular file")
+    if {name for name in ("memory.db", "vectors.index.npy") if (directory / name).is_file()} != names:
+        raise AssertionError("Backup file set mismatch")
+    for name in names:
         if digest(directory / name) != manifest["files"][name]:
             raise AssertionError(f"Checksum mismatch: {name}")
-    if set(manifest["files"]) not in ({"memory.db"}, {"memory.db", "vectors.index.npy"}):
-        raise AssertionError("Invalid backup manifest file set")
-    if {name for name in ("memory.db", "vectors.index.npy") if (directory / name).is_file()} != set(manifest["files"]):
-        raise AssertionError("Backup file set mismatch")
-    if "vectors.index.npy" in manifest["files"]:
+    if "vectors.index.npy" in names:
         if ids_match(directory / "memory.db", directory / "vectors.index.npy") != manifest["vectors"]:
             raise AssertionError("Backup vector count mismatch")
     else:

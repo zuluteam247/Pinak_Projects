@@ -104,3 +104,28 @@ def test_backup_checks_survive_python_optimized(tmp_path):
     assert result.returncode != 0
     assert "Database/vector ID mismatch" in result.stderr
     assert not list((tmp_path / "backup").iterdir())
+
+
+def test_verify_backup_rejects_manifest_traversal_before_digest(tmp_path, monkeypatch):
+    from unittest.mock import patch
+    data = tmp_path / "data"; data.mkdir()
+    DatabaseManager(str(data / "memory.db"))
+    backup = create_backup(data, tmp_path / "backups")
+    manifest_path = backup / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"] = {"../secret.txt": "0" * 64}
+    manifest_path.write_text(json.dumps(manifest))
+    with patch("scripts.backup_verified.digest") as digest_spy:
+        with pytest.raises(AssertionError, match="file set"):
+            verify_backup(backup)
+        digest_spy.assert_not_called()
+
+
+def test_verify_backup_rejects_member_symlink(tmp_path):
+    data = tmp_path / "data"; data.mkdir()
+    DatabaseManager(str(data / "memory.db"))
+    backup = create_backup(data, tmp_path / "backups")
+    (backup / "memory.db").unlink()
+    (backup / "memory.db").symlink_to(data / "memory.db")
+    with pytest.raises(AssertionError, match="regular file"):
+        verify_backup(backup)
