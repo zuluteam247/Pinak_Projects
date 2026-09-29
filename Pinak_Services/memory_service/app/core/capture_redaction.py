@@ -92,9 +92,20 @@ REDACTION_PLACEHOLDERS: Dict[str, str] = {
     CATEGORY_TOKEN: "[redacted:token]",
 }
 
-# Every category above is a secret-or-credential match in the amendment's
-# sense, so any hit makes the envelope restricted.
-SECRET_CATEGORIES = frozenset(REDACTION_PLACEHOLDERS)
+# Personal data. Kept apart from the secret categories because it carries a
+# different class: a secret is restricted by the amendment's own words, while a
+# direct personal identifier is confidential. See assign_privacy_class.
+CATEGORY_PII = "personal_data"
+CATEGORY_PAYMENT = "payment_instrument"
+
+REDACTION_PLACEHOLDERS[CATEGORY_PII] = "[redacted:personal_data]"
+REDACTION_PLACEHOLDERS[CATEGORY_PAYMENT] = "[redacted:payment_instrument]"
+
+PII_CATEGORIES = frozenset({CATEGORY_PII, CATEGORY_PAYMENT})
+# Any non-PII category is a secret or credential match, so it makes the
+# envelope restricted.
+SECRET_CATEGORIES = frozenset(REDACTION_PLACEHOLDERS) - PII_CATEGORIES
+PII_PRIVACY_CLASS = "confidential"
 
 # Key names that make the VALUE a secret regardless of what the value looks
 # like. Matched case-insensitively against the key with separators removed, so
@@ -127,6 +138,32 @@ _SECRET_KEY_NAMES: Tuple[Tuple[str, str], ...] = (
     ("sessionkey", CATEGORY_SECRET),
     ("connectionstring", CATEGORY_CREDENTIAL),
     ("dsn", CATEGORY_CREDENTIAL),
+    # Personal identifiers named by their key. For several of these the value
+    # shape alone is too weak to match on (a bare nine-digit number, a passport
+    # code), so the key name is what carries them.
+    ("ssn", CATEGORY_PII),
+    ("socialsecurity", CATEGORY_PII),
+    ("socialsecuritynumber", CATEGORY_PII),
+    ("nationalid", CATEGORY_PII),
+    ("aadhaar", CATEGORY_PII),
+    ("aadhar", CATEGORY_PII),
+    ("pannumber", CATEGORY_PII),
+    ("passport", CATEGORY_PII),
+    ("passportnumber", CATEGORY_PII),
+    ("driverlicense", CATEGORY_PII),
+    ("drivinglicence", CATEGORY_PII),
+    ("taxid", CATEGORY_PII),
+    ("dateofbirth", CATEGORY_PII),
+    ("dob", CATEGORY_PII),
+    ("cardnumber", CATEGORY_PAYMENT),
+    ("creditcard", CATEGORY_PAYMENT),
+    ("cardnum", CATEGORY_PAYMENT),
+    ("cvv", CATEGORY_PAYMENT),
+    ("cvc", CATEGORY_PAYMENT),
+    ("iban", CATEGORY_PAYMENT),
+    ("accountnumber", CATEGORY_PAYMENT),
+    ("routingnumber", CATEGORY_PAYMENT),
+    ("sortcode", CATEGORY_PAYMENT),
 )
 
 _KEY_SEPARATORS = re.compile(r"[^a-z0-9]+")
@@ -167,7 +204,36 @@ _VALUE_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
     (re.compile(r"(?i)\bBasic\s+[A-Za-z0-9+/=]{16,}"), CATEGORY_CREDENTIAL),
     # Credentials embedded in a URL authority: scheme://user:pass@host.
     (re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s/@:]+:[^\s/@]+@"), CATEGORY_CREDENTIAL),
+    # US Social Security number. The area part cannot be 000, 666 or 900-999,
+    # and neither the group nor the serial may be all zeroes, so a placeholder
+    # like 000-00-0000 in a fixture is left alone.
+    (re.compile(r"\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b"), CATEGORY_PII),
+    # India Aadhaar: twelve digits, first never 0 or 1, usually spaced in fours.
+    (re.compile(r"\b[2-9]\d{3}[ -]?\d{4}[ -]?\d{4}\b"), CATEGORY_PII),
+    # India PAN.
+    (re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b"), CATEGORY_PII),
+    # IBAN.
+    (re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"), CATEGORY_PAYMENT),
+    # Email address.
+    (re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"), CATEGORY_PII),
 )
+
+# Payment cards are matched separately. The shape alone, thirteen to nineteen
+# digits, hits ordinary long numbers constantly, so a candidate is only redacted
+# once it passes the Luhn check the card networks themselves use.
+_CARD_CANDIDATE = re.compile(r"\b(?:\d[ -]?){12,18}\d\b")
+
+
+def _luhn_ok(digits: str) -> bool:
+    total = 0
+    for index, char in enumerate(reversed(digits)):
+        value = ord(char) - 48
+        if index % 2:
+            value *= 2
+            if value > 9:
+                value -= 9
+        total += value
+    return total % 10 == 0
 
 
 class RedactionError(Exception):
@@ -211,6 +277,10 @@ class RedactionReport:
     @property
     def found_secret(self) -> bool:
         return any(c in SECRET_CATEGORIES for c in self.counts_by_category)
+
+    @property
+    def found_personal_data(self) -> bool:
+        return any(c in PII_CATEGORIES for c in self.counts_by_category)
 
     def as_detail(self) -> Dict[str, Any]:
         """Wire-safe summary: counts and category codes, never content."""
@@ -274,6 +344,15 @@ def _redact_string_value(value: str) -> Tuple[str, Dict[str, int]]:
         cleaned, hits = pattern.subn(placeholder, cleaned)
         if hits:
             counts[category] = counts.get(category, 0) + hits
+
+    def _card(match: "re.Match") -> str:
+        digits = "".join(ch for ch in match.group(0) if ch.isdigit())
+        if _luhn_ok(digits):
+            counts[CATEGORY_PAYMENT] = counts.get(CATEGORY_PAYMENT, 0) + 1
+            return REDACTION_PLACEHOLDERS[CATEGORY_PAYMENT]
+        return match.group(0)
+
+    cleaned = _CARD_CANDIDATE.sub(_card, cleaned)
     return cleaned, counts
 
 
@@ -304,7 +383,21 @@ def _redact(value: Any, counts: Dict[str, int], depth: int = 0,
         out: Dict[str, Any] = {}
         for key, item in value.items():
             category = forced_category or _category_for_key(key)
-            out[key] = _redact(item, counts, depth + 1, category)
+            # The KEY is payload content too. A caller that writes
+            # {"AKIA...": "see attached"} has put the secret in the field name,
+            # and redacting only values leaves it in the canonical bytes and
+            # therefore in the hash. So the key goes through the same value-shape
+            # pass before it is written back.
+            safe_key = key
+            if isinstance(key, str):
+                safe_key, key_hits = _redact_string_value(key)
+                _merge(counts, key_hits)
+                if safe_key != key and safe_key in out:
+                    # Two distinct keys redacted down to the same placeholder.
+                    # Collapsing them would silently drop a branch, so the later
+                    # one is suffixed by position rather than lost.
+                    safe_key = f"{safe_key}.{len(out)}"
+            out[safe_key] = _redact(item, counts, depth + 1, category)
         return out
 
     if isinstance(value, (list, tuple)):
@@ -327,9 +420,23 @@ def _redact(value: Any, counts: Dict[str, int], depth: int = 0,
 
 
 def assign_privacy_class(report: RedactionReport) -> str:
-    """CW 4.5: a secret or credential match is restricted; ordinary work is internal."""
+    """CW 4.5: a secret or credential match is restricted; ordinary work is internal.
 
-    return SECRET_PRIVACY_CLASS if report.found_secret else DEFAULT_PRIVACY_CLASS
+    Personal data sits between the two and is classified confidential. The
+    amendment settles confidential as a member of the enum but states no rule
+    that assigns it, so this rule is NOT the amendment's: it comes from the 1b
+    verification round, where direct personal identifiers were found surviving
+    a redaction pass that only looked for secrets. It is recorded here as an
+    implementation decision awaiting owner ratification, and it is one line to
+    change if the owner wants personal data classified differently. Precedence
+    is strict: a payload carrying both a secret and personal data is restricted.
+    """
+
+    if report.found_secret:
+        return SECRET_PRIVACY_CLASS
+    if report.found_personal_data:
+        return PII_PRIVACY_CLASS
+    return DEFAULT_PRIVACY_CLASS
 
 
 def assign_retention_class() -> str:

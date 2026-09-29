@@ -22,6 +22,7 @@ import pytest
 from app.core.capture_envelope import MAX_PAYLOAD_DEPTH, canonical_json_bytes
 from app.core.capture_redaction import (
     DEFAULT_PRIVACY_CLASS,
+    PII_PRIVACY_CLASS,
     PRIVACY_CLASSES,
     RAW_STAGED_RETENTION_CLASS,
     RAW_STAGED_TTL_DAYS,
@@ -83,11 +84,15 @@ def test_legal_hold_is_never_assigned_automatically():
         assert redact_and_classify(payload).retention_class == "task"
 
 
-def test_public_and_confidential_are_never_assigned_by_1b():
-    # They are members of the enum, but the amendment states no rule that
-    # assigns either automatically, so 1b assigns neither.
-    for payload in ({"text": "public announcement"}, {"ssn": "not a rule yet"}):
-        assert redact_and_classify(payload).privacy_class in ("internal", "restricted")
+def test_public_is_never_assigned_by_1b():
+    # public is a member of the enum, but the amendment states no rule that
+    # assigns it, so 1b never does. confidential DOES get assigned, for
+    # personal data: that rule comes from the 1b verification round, not from
+    # the amendment, and is marked as awaiting owner ratification in the code.
+    for payload in ({"text": "public announcement"},
+                    {"text": "nothing sensitive here"},
+                    {"api_key": "x"}):
+        assert redact_and_classify(payload).privacy_class != "public"
 
 
 # --- CW 5.1: redact before hash, and hash the redacted bytes ----------------
@@ -297,3 +302,111 @@ def test_counts_are_accurate_per_category():
     })
     assert result.report.redaction_count == 3
     assert result.report.found_secret is True
+
+
+# --- Round 2: the two gaps zulu's probes found ------------------------------
+#
+# Both were real. Neither was a shape the redactor failed to recognise; both
+# were places the redactor never looked.
+
+
+def test_ssn_in_a_value_is_redacted_and_classified_confidential():
+    result = redact_and_classify({"note": "his ssn is 123-45-6789, filed already"})
+    dumped = json.dumps(result.payload)
+    assert "123-45-6789" not in dumped
+    assert "filed already" in dumped
+    assert result.privacy_class == PII_PRIVACY_CLASS == "confidential"
+
+
+@pytest.mark.parametrize("key", [
+    "ssn", "social_security_number", "aadhaar", "pan_number", "passport",
+    "date_of_birth", "dob", "national_id", "tax_id", "driver_license",
+])
+def test_personal_identifier_key_names_redact_their_value(key):
+    result = redact_and_classify({key: "whatever-it-holds"})
+    assert "whatever-it-holds" not in json.dumps(result.payload)
+    assert result.privacy_class == "confidential"
+
+
+@pytest.mark.parametrize("key", ["card_number", "credit_card", "cvv", "iban",
+                                 "account_number", "routing_number"])
+def test_payment_key_names_redact_their_value(key):
+    result = redact_and_classify({key: "4111111111111111"})
+    assert "4111111111111111" not in json.dumps(result.payload)
+    assert result.privacy_class == "confidential"
+
+
+def test_card_number_passing_luhn_is_redacted_in_prose():
+    result = redact_and_classify({"text": "paid with 4111 1111 1111 1111 today"})
+    dumped = json.dumps(result.payload)
+    assert "4111" not in dumped
+    assert "today" in dumped
+
+
+def test_long_number_failing_luhn_is_left_alone():
+    # An ordinary long identifier is not a card and must survive, or every
+    # sequence number in a transcript gets shredded.
+    result = redact_and_classify({"text": "build id 1234567890123456 finished"})
+    assert "1234567890123456" in json.dumps(result.payload)
+
+
+def test_email_address_is_redacted():
+    result = redact_and_classify({"text": "ping abhijeet@example.com about it"})
+    dumped = json.dumps(result.payload)
+    assert "abhijeet@example.com" not in dumped
+    assert result.privacy_class == "confidential"
+
+
+def test_personal_data_at_depth_is_redacted():
+    payload = {"steps": [{"applicant": {"ssn": "123-45-6789"}}]}
+    result = redact_and_classify(payload)
+    assert "123-45-6789" not in json.dumps(result.payload)
+
+
+def test_secret_outranks_personal_data_in_the_class():
+    result = redact_and_classify(
+        {"ssn": "123-45-6789", "api_key": "whatever"})
+    assert result.privacy_class == "restricted"
+
+
+# --- Gap two: the secret lived in the KEY, not the value --------------------
+
+def test_secret_in_a_key_name_is_redacted_from_the_payload():
+    leaked = "AKIA" + "IOSFODNN7EXAMPLE"
+    result = redact_and_classify({leaked: "see attached"})
+    assert leaked not in json.dumps(result.payload)
+    assert result.privacy_class == "restricted"
+
+
+def test_secret_in_a_key_name_never_reaches_the_hashed_bytes():
+    # This is the one that mattered: a masked value with an unmasked key still
+    # canonicalizes the secret straight into payload_hash.
+    leaked = "gh" + "p_" + "q" * 36
+    result = redact_and_classify({leaked: "token rotated"})
+    assert leaked.encode() not in result.canonical_bytes
+
+
+def test_personal_data_in_a_key_name_is_redacted_too():
+    result = redact_and_classify({"contact-abhijeet@example.com": "called"})
+    assert "abhijeet@example.com" not in json.dumps(result.payload)
+
+
+def test_secret_in_a_nested_key_name_is_redacted():
+    leaked = "xox" + "b-123456789012-abcdefghijklmnop"
+    result = redact_and_classify({"outer": [{leaked: 1}]})
+    assert leaked not in json.dumps(result.payload)
+
+
+def test_two_keys_redacting_to_the_same_placeholder_keep_both_branches():
+    # Collapsing them would silently drop a branch of the payload.
+    first = "AKIA" + "IOSFODNN7EXAMPL1"
+    second = "AKIA" + "IOSFODNN7EXAMPL2"
+    result = redact_and_classify({first: "one", second: "two"})
+    values = json.dumps(result.payload)
+    assert "one" in values and "two" in values
+    assert len(result.payload) == 2
+
+
+def test_ordinary_keys_are_not_rewritten():
+    result = redact_and_classify({"event_type": "message", "sequence": 4})
+    assert set(result.payload) == {"event_type", "sequence"}
