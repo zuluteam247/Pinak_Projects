@@ -11,6 +11,7 @@ from app.core.schemas import (
     ClientIssueCreate, ClientIssueRead, ClientRegisterCreate, ClientRegisterRead
 )
 from app.core.security import AuthContext, require_auth_context, require_scope, require_role
+from app.core.capture_envelope import CaptureRejection, validate_capture_envelope
 from app.core.schema_registry import SchemaRegistry
 from app.services.memory_service import MemoryService
 
@@ -54,6 +55,51 @@ def list_schemas(
     return {
         "schemas": out,
     }
+
+# --- Capture wire (Phase 1 slice 1a, P-85) ---
+#
+# Route decision, recorded and not silently taken (CW 2.1 / P-85): capture
+# lives at POST /api/v1/memory/capture, under this router, inheriting the auth
+# and readiness guard already exercised here, rather than a new top-level
+# /v1/capture. A later move to /v1/capture is a rename with a redirect once the
+# pipeline is real. The written rationale is docs/adr-0002-capture-route.md.
+
+@router.post("/capture")
+def capture_event(
+    body: Any = Body(...),
+    ctx: AuthContext = Depends(require_auth_context),
+):
+    """Validate a capture envelope and refuse it.
+
+    1a is capture-only schema, auth and tenant binding. Nothing is redacted,
+    nothing is hashed and nothing is written. Until 1b and 1c exist and pass
+    the joint gate, a schema-valid envelope gets 503 capture_disabled and never
+    202 (CW 7.4).
+    """
+
+    require_scope(ctx, "memory.write")
+    claim = {
+        "tenant_id": ctx.tenant_id,
+        "agent_id": ctx.subject,
+        "client_id": ctx.effective_client_id,
+    }
+    try:
+        validate_capture_envelope(body, claim)
+    except CaptureRejection as rejection:
+        raise HTTPException(status_code=rejection.status_code,
+                            detail=rejection.as_detail()) from rejection
+
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "code": "capture_disabled",
+            "message": (
+                "Capture is validated but disabled until server-side redaction "
+                "(1b) and recall-blind staging with TTL (1c) pass the joint gate."
+            ),
+        },
+    )
+
 
 # --- Semantic Memory ---
 
