@@ -204,16 +204,19 @@ _VALUE_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
     (re.compile(r"(?i)\bBasic\s+[A-Za-z0-9+/=]{16,}"), CATEGORY_CREDENTIAL),
     # Credentials embedded in a URL authority: scheme://user:pass@host.
     (re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s/@:]+:[^\s/@]+@"), CATEGORY_CREDENTIAL),
+    # IBAN, in both the compact and the printed spaced-in-fours form.
+    (re.compile(r"\b[A-Z]{2}\d{2}(?:[ -]?[A-Z0-9]){11,30}\b"), CATEGORY_PAYMENT),
     # US Social Security number. The area part cannot be 000, 666 or 900-999,
     # and neither the group nor the serial may be all zeroes, so a placeholder
     # like 000-00-0000 in a fixture is left alone.
     (re.compile(r"\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b"), CATEGORY_PII),
-    # India Aadhaar: twelve digits, first never 0 or 1, usually spaced in fours.
-    (re.compile(r"\b[2-9]\d{3}[ -]?\d{4}[ -]?\d{4}\b"), CATEGORY_PII),
+    # India Aadhaar: twelve digits, conventionally spaced in fours. The issuing
+    # range never starts 0 or 1, but a redactor that trusts that leaks anything
+    # mistyped or test-shaped, so any twelve-digit run in this grouping goes.
+    # Over-redacting a bare twelve-digit id is the cheap direction of the error.
+    (re.compile(r"\b\d{4}[ -]?\d{4}[ -]?\d{4}\b"), CATEGORY_PII),
     # India PAN.
     (re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b"), CATEGORY_PII),
-    # IBAN.
-    (re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"), CATEGORY_PAYMENT),
     # Email address.
     (re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"), CATEGORY_PII),
 )
@@ -351,11 +354,6 @@ def _redact_string_value(value: str) -> Tuple[str, Dict[str, int]]:
 
     counts: Dict[str, int] = {}
     cleaned = value
-    for pattern, category in _VALUE_PATTERNS:
-        placeholder = REDACTION_PLACEHOLDERS[category]
-        cleaned, hits = pattern.subn(placeholder, cleaned)
-        if hits:
-            counts[category] = counts.get(category, 0) + hits
 
     def _card(match: "re.Match") -> str:
         digits = "".join(ch for ch in match.group(0) if ch.isdigit())
@@ -364,7 +362,17 @@ def _redact_string_value(value: str) -> Tuple[str, Dict[str, int]]:
             return REDACTION_PLACEHOLDERS[CATEGORY_PAYMENT]
         return match.group(0)
 
+    # Cards run FIRST and take the whole number. Run after the shorter
+    # digit-group patterns, a sixteen-digit card loses its leading twelve to the
+    # Aadhaar shape and the last four survive into the canonical bytes.
     cleaned = _CARD_CANDIDATE.sub(_card, cleaned)
+
+    for pattern, category in _VALUE_PATTERNS:
+        placeholder = REDACTION_PLACEHOLDERS[category]
+        cleaned, hits = pattern.subn(placeholder, cleaned)
+        if hits:
+            counts[category] = counts.get(category, 0) + hits
+
     return cleaned, counts
 
 
@@ -403,7 +411,11 @@ def _redact(value: Any, counts: Dict[str, int], depth: int = 0) -> Any:
                 # whole entry collapses here and we do not recurse.
                 placeholder = REDACTION_PLACEHOLDERS[category]
                 _merge(counts, {category: 1})
-                out[_unique_key(out, placeholder)] = placeholder
+                # null carries nothing, so it is preserved as null rather than
+                # masked: a placeholder there would claim a value existed.
+                # The key still goes, since the key name is the hit.
+                safe_value = None if item is None else placeholder
+                out[_unique_key(out, placeholder)] = safe_value
                 continue
 
             # The KEY is payload content too, even when its name is innocuous:

@@ -147,11 +147,12 @@ def test_key_name_redacts_non_string_values_too():
     assert result.privacy_class == "restricted"
 
 
-def test_null_under_a_secret_key_is_still_collapsed():
-    # The key name is the hit, so the entry goes whatever the value holds. An
-    # exception for null would leave "password" itself sitting in the bytes.
+def test_null_under_a_secret_key_stays_null():
+    # The key name is the hit so the key goes, but null carries nothing: a
+    # placeholder there would claim a value existed where none did.
     result = redact_and_classify({"password": None})
     assert "password" not in json.dumps(result.payload)
+    assert list(result.payload.values()) == [None]
     assert result.privacy_class == "restricted"
 
 
@@ -456,3 +457,57 @@ def test_an_innocuous_key_still_recurses_into_its_subtree():
 def test_sibling_of_a_redacted_key_is_untouched():
     result = redact_and_classify({"password": "x", "event_type": "message"})
     assert result.payload["event_type"] == "message"
+
+
+# --- Round 4: zulu's four exact vectors ------------------------------------
+# Strings below are shape examples, not credentials.
+
+def test_vector_free_text_aadhaar():
+    result = redact_and_classify({"note": "aadhaar is 1234 5678 9012 ok"})
+    assert "1234 5678 9012" not in json.dumps(result.payload)
+    assert b"5678" not in result.canonical_bytes
+    assert result.privacy_class == "confidential"
+
+
+def test_vector_printed_iban():
+    result = redact_and_classify({"note": "GB82 WEST 1234 5698 7654 32"})
+    dumped = json.dumps(result.payload)
+    assert "WEST" not in dumped
+    assert "7654" not in dumped
+    assert result.privacy_class == "confidential"
+
+
+def test_vector_card_is_masked_whole_including_the_last_four():
+    result = redact_and_classify({"note": "card 4111 1111 1111 1111 on file"})
+    dumped = json.dumps(result.payload)
+    assert "4111" not in dumped
+    assert "1111" not in dumped
+    assert b"1111" not in result.canonical_bytes
+    # The prose around it survives, which is the point of a span replacement.
+    assert "on file" in dumped
+
+
+def test_vector_null_under_ssn_key_stays_null():
+    result = redact_and_classify({"ssn": None})
+    assert list(result.payload.values()) == [None]
+    assert "ssn" not in json.dumps(result.payload)
+
+
+def test_compact_iban_still_matches():
+    result = redact_and_classify({"note": "GB82WEST12345698765432"})
+    assert "WEST" not in json.dumps(result.payload)
+
+
+def test_a_twelve_digit_id_is_redacted_rather_than_risked():
+    # Deliberate over-redaction: the grouping is indistinguishable from an
+    # Aadhaar, and leaking one is worse than masking an id.
+    result = redact_and_classify({"note": "ref 100000000001"})
+    assert "100000000001" not in json.dumps(result.payload)
+
+
+def test_short_digit_runs_are_left_alone():
+    result = redact_and_classify(
+        {"count": "1234", "year": "2026", "phone_ext": "4821"})
+    assert result.payload["count"] == "1234"
+    assert result.payload["year"] == "2026"
+    assert result.privacy_class == "internal"
